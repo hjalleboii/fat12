@@ -62,12 +62,18 @@ static_assert(sizeof(FileEntry)==32);
 
 const uint8_t Signature_word[2] = {0x55,0xAA};
 
-struct File{
-    uint32_t entry;
-    uint32_t offset;
+
+struct Directory{
+    uint16_t fat_entry;
 };
 
-typedef uint16_t SectorIterator;
+struct FileHandle{
+    uint16_t direntry;
+    uint16_t dirindex;
+    
+};
+
+typedef  uint16_t FatIterator;
 
 enum Status{
     OK,
@@ -87,33 +93,36 @@ enum BytesPerSector{
 
 
 class FAT12{
+    public:
     uint8_t* disk;
     size_t disk_size;
     BPB bpb;
     uint16_t GetFAT12_entry(size_t index);
     int SetFAT12_entry(size_t index,uint16_t value);
     int ReadFirst512bytes(BPB*out);
-    int WriteFAT12EntryToBuffer(uint8_t* buffer, uint16_t val, bool odd);
     static bool IsFAT12(const BPB*bpb);
-    int NextSec(SectorIterator* iterator);
-    int ReadSector(size_t index,uint8_t* buffer,size_t buffersize);
-    int WriteSector(size_t index,const uint8_t* buffer,size_t buffersize);
     int ClearFAT();
-
+    FatIterator IterateFat(FatIterator* it);
+    int InitRootDir();
+    uint16_t GetNextFreeCluster();
+    int ClearCluster(uint16_t index);
+    size_t OffsetToCluster(uint16_t index);
 public:
     FAT12(uint8_t* disk,size_t disk_size);
-
-
-    int Format(const char* volumename, BytesPerSector bytespersector,uint8_t SectorPerClusters, bool dual_FATs);
     
-    File Open(const char* filepath,uint8_t mode);
-    int Read(File& file,uint8_t * buffer, size_t buffersize);
-    int Write(File& file,uint8_t * buffer, size_t buffersize);
+    uint32_t GetFreeDiskSpaceAmount();
+    int AllocateNewEntryInDir(Directory dir, FileHandle* out_entry);
+    int Format(const char* volumename, BytesPerSector bytespersector,uint8_t SectorPerClusters, bool dual_FATs);
+    int CreateDir(const char name[8],const char extension[3],Directory parent);
+
+    //File Open(const char* filepath,uint8_t mode);
+    //int Read(File& file,uint8_t * buffer, size_t buffersize);
+    //int Write(File& file,uint8_t * buffer, size_t buffersize);
+    int SectorSerialDump(size_t index);
 
     int Mount();
 
 
-    void Test();
 };
 
 

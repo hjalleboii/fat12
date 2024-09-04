@@ -8,31 +8,14 @@ uint16_t FAT12::GetFAT12_entry(size_t index)
 {
      size_t offset_bits = index * 12;
     //size_t bitoffset_intou16 = (index%2)*4;
-    size_t bitsintobytes = (index%2)*4;
+    size_t bitsintobytes = offset_bits%8;
     size_t offset_bytes = offset_bits/8;
     
-    size_t ThisFATSecNum = bpb.BPB_RsvdSecCnt + (offset_bytes / bpb.BPB_BytsPerSec);
-    size_t ThisFATEntOffset = offset_bytes % bpb.BPB_BytsPerSec; 
-
-    bool second_sector = (bpb.BPB_BytsPerSec-1) == ThisFATEntOffset;
-
-    uint8_t buffer[(1+second_sector)*bpb.BPB_BytsPerSec]={
-        0xFF
-    };
-    if(ReadSector(ThisFATSecNum,buffer,bpb.BPB_BytsPerSec)!=OK)return 0;
-
-    if(second_sector){
-        if(
-            ReadSector(
-            ThisFATSecNum,
-            buffer + bpb.BPB_BytsPerSec,
-            bpb.BPB_BytsPerSec
-            ) != OK
-        )return ERROR;
-    } 
+    size_t disk_offset = (bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec) + offset_bytes;
 
 
-    uint16_t number = buffer[ThisFATEntOffset] | buffer[ThisFATEntOffset+1] << 8;
+    uint16_t number;
+    memcpy(&number,disk+disk_offset,sizeof(number));
 
     number >>= bitsintobytes;
     number&=0x0fff;
@@ -42,50 +25,24 @@ uint16_t FAT12::GetFAT12_entry(size_t index)
 int FAT12::SetFAT12_entry(size_t index, uint16_t value)
 {
     size_t offset_bits = index * 12;
-    //size_t bitoffset_intou16 = (index%2)*4;
-    bool odd = (index%2);
     size_t offset_bytes = offset_bits/8;
     
-    size_t ThisFATSecNum = bpb.BPB_RsvdSecCnt + (offset_bytes / bpb.BPB_BytsPerSec);
-    size_t ThisFATEntOffset = offset_bytes % bpb.BPB_BytsPerSec; 
+    bool odd = index%2;
+    size_t disk_offset = (bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec) + offset_bytes;
 
-    bool second_sector = (bpb.BPB_BytsPerSec-1) == ThisFATEntOffset;
+    
+    uint16_t twobytes;
+    memcpy(&twobytes,disk+disk_offset,sizeof(twobytes));
 
-    uint8_t buffer[(1+second_sector)*bpb.BPB_BytsPerSec]={
-        0xFF
-    };
-    if(ReadSector(ThisFATSecNum,buffer,bpb.BPB_BytsPerSec)!=OK)return ERROR;
-
-    if(second_sector){
-        if(
-            ReadSector(
-            ThisFATSecNum,
-            buffer + bpb.BPB_BytsPerSec,
-            bpb.BPB_BytsPerSec
-            ) != OK
-        )return ERROR;
-    } 
-
-
-
-
-
-    //uint16_t number = buffer[ThisFATEntOffset] | buffer[ThisFATEntOffset+1] << 8;
-    WriteFAT12EntryToBuffer((buffer+ThisFATEntOffset),value,odd);
-    PRINT_X(GetFAT12_entry(index));
-
-    if(WriteSector(ThisFATSecNum,buffer,bpb.BPB_BytsPerSec)!=OK)return ERROR;
-    if(second_sector){
-        if(
-            WriteSector(
-            ThisFATSecNum,
-            buffer + bpb.BPB_BytsPerSec,
-            bpb.BPB_BytsPerSec
-            ) != OK
-        )return ERROR;
+    if(odd){
+        value <<= 4;
+        twobytes &= 0x000f;
+    }else{
+        twobytes &= 0xf000;
     }
+    twobytes |= value;
 
-
+    memcpy(disk+disk_offset,&twobytes,sizeof(twobytes));
 
     return OK;
 }
@@ -107,73 +64,91 @@ int FAT12::ReadFirst512bytes(BPB *out)
     return OK;
 }
 
-int FAT12::WriteFAT12EntryToBuffer(uint8_t *buffer, uint16_t val, bool odd)
-{
-    uint16_t number = buffer[0] | buffer[1] << 8;
-    PRINT_X(number);
-    PRINT_X(val);
-    PRINT_X(odd);
-    //nullify
-    if(odd){
-        number &= 0xf;
-        val <<= 4;
-    }else{
-        number &= (0xf << 12);
 
-    }
-    number |= val;
 
-    PRINT_X(val);
-    PRINT_X(number);
-    printf("---\n");
-    buffer[0] = number&0xFF;
-    buffer[1] = number>>8;
-    
-    
-    uint16_t vt= buffer[0] | buffer[1] << 8;
-    PRINT_X(vt);
-    return OK;
-}
 
-int FAT12::NextSec(SectorIterator *iterator)
-{
-    uint16_t next = GetFAT12_entry(*iterator);
-    if(next == END_OF_FILE ){// some other values may also indicate eof
-        return END;
-    }
-    *iterator = next;
-    return OK;
-}
-
-int FAT12::ReadSector(size_t index,uint8_t *buffer, size_t buffersize)
-{
-    if(buffersize!=bpb.BPB_BytsPerSec)return ERROR;
-    /// this can be changed to implement another disk type.
-    memcpy(buffer,disk+index*(bpb.BPB_BytsPerSec),bpb.BPB_BytsPerSec);
-    return OK;
-}
-
-int FAT12::WriteSector(size_t index, const uint8_t *buffer, size_t buffersize)
-{
-    if(buffersize!=bpb.BPB_BytsPerSec)return ERROR;
-    memcpy(disk+index*(bpb.BPB_BytsPerSec),buffer,bpb.BPB_BytsPerSec);
-    return OK;
-}
 
 int FAT12::ClearFAT()
 {
     uint8_t buffer[bpb.BPB_FATSz16*bpb.BPB_BytsPerSec]={0};
     
-    WriteFAT12EntryToBuffer(buffer,0xFF8,false);
-    WriteFAT12EntryToBuffer(buffer+1,0xFFF,true);
+    SetFAT12_entry(0,0xFF8);
+    SetFAT12_entry(1,0xFFF);
 
-
-    bpb.BPB_RsvdSecCnt;
-    for(size_t i = 0; i < bpb.BPB_FATSz16;i++){
-        WriteSector(bpb.BPB_RsvdSecCnt+i,buffer+i*bpb.BPB_BytsPerSec,bpb.BPB_BytsPerSec);
-    }
+    memset(disk+(bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec),0,(bpb.BPB_FATSz16*bpb.BPB_BytsPerSec));
     return 0;
     
+}
+
+FatIterator FAT12::IterateFat(FatIterator *it)
+{
+    uint16_t newval = GetFAT12_entry(*it);
+    
+    if (newval==0xfff){
+        *it = 0;
+    }else{
+        *it = newval;
+    }
+    return *it;
+}
+
+int FAT12::InitRootDir()
+{
+    FileEntry volumelabel;
+    volumelabel.DIR_Attr = 0x08;
+    volumelabel.DIR_NTRes =0x00;//SHould always be 0
+    volumelabel.DIR_CrtTimeTenth = 0x00; // 0 <= && <= 199
+    volumelabel.DIR_CrtTime = 0x00; // Granularity 2 secs
+    volumelabel.DIR_CrtDate = 0x00;
+    volumelabel.DIR_LstAccDate = 0x00;
+    volumelabel.DIR_FstClusHI = 0x00;
+    volumelabel.DIR_WrtTime = 0x00;
+    volumelabel.DIR_WrtDate = 0x00;
+    volumelabel.DIR_FstClusLO = 0x00;
+    volumelabel.DIR_FileSize = 0x0;
+
+    memset(
+        disk + OffsetToCluster(0),
+        0,
+        bpb.BPB_RootEntCnt * sizeof(FileEntry)
+    );
+
+
+    memcpy(volumelabel.DIR_Name,bpb.BS_VolLab,sizeof(bpb.BS_VolLab));
+
+
+    memcpy(
+        disk+(bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec) + (bpb.BPB_FATSz16*bpb.BPB_NumFATs*bpb.BPB_BytsPerSec),
+        &volumelabel,
+        sizeof(volumelabel)
+    );
+
+    return OK;
+}
+
+uint16_t FAT12::GetNextFreeCluster()
+{
+    uint32_t freeclusters = 0;
+    for(uint32_t i =0; i < (bpb.BPB_TotSec16-(bpb.BPB_RsvdSecCnt +bpb.BPB_NumFATs*bpb.BPB_FATSz16))/bpb.BPB_SecPerClus; i++){
+        if(GetFAT12_entry(i) == 0){
+            return i;
+        }
+    }
+    return 0;
+}
+
+int FAT12::ClearCluster(uint16_t index)
+{
+    if (!( index < (bpb.BPB_TotSec16-(bpb.BPB_RsvdSecCnt +bpb.BPB_NumFATs*bpb.BPB_FATSz16))/bpb.BPB_SecPerClus)){
+        return ERROR;
+    }
+    memset(disk + OffsetToCluster(index),0,bpb.BPB_BytsPerSec*bpb.BPB_SecPerClus);
+    return OK;
+}
+
+size_t FAT12::OffsetToCluster(uint16_t index)
+{
+    return (bpb.BPB_RsvdSecCnt + (bpb.BPB_FATSz16 * bpb.BPB_NumFATs) + index*bpb.BPB_SecPerClus) * bpb.BPB_BytsPerSec;
 }
 
 bool FAT12::IsFAT12(const BPB *bpb)
@@ -215,6 +190,42 @@ bool FAT12::IsFAT12(const BPB *bpb)
 FAT12::FAT12(uint8_t *disk, size_t disk_size):disk(disk),disk_size(disk_size)
 {
     
+}
+
+uint32_t FAT12::GetFreeDiskSpaceAmount()
+{   
+    uint32_t freeclusters = 0;
+    for(unsigned i =0; i < (bpb.BPB_TotSec16-(bpb.BPB_RsvdSecCnt +bpb.BPB_NumFATs*bpb.BPB_FATSz16))/bpb.BPB_SecPerClus; i++){
+        if(GetFAT12_entry(i) == 0){
+            freeclusters ++;
+        }
+    }
+    return freeclusters*bpb.BPB_SecPerClus * bpb.BPB_BytsPerSec;
+}
+
+int FAT12::AllocateNewEntryInDir(Directory dir, FileHandle *out_entry)
+{
+    FatIterator lastent;
+    for(FatIterator ent = dir.fat_entry; ent!=0; IterateFat(&ent)){
+        for(uint16_t i = 0;
+        i < bpb.BPB_SecPerClus*bpb.BPB_BytsPerSec/sizeof(FileEntry);
+        i++){
+            uint8_t fbyte;
+            memcpy(&fbyte,disk + OffsetToCluster(ent) + i * sizeof(FileEntry),sizeof(fbyte) );
+            if(fbyte ==  0xE5 || fbyte == 0x00){
+                *out_entry = FileHandle{ent, i};
+                return OK;
+            }
+        }
+        lastent = ent;
+    }
+    uint16_t newsector = GetNextFreeCluster();
+    if(!newsector)return ERROR;
+    SetFAT12_entry(lastent,newsector);
+    SetFAT12_entry(newsector,0xfff);
+    *out_entry = FileHandle{newsector,0};
+    return OK;
+
 }
 
 int FAT12::Format(const char *volumename, BytesPerSector bytespersector, uint8_t SectorPerClusters, bool dual_FATs)
@@ -269,15 +280,87 @@ int FAT12::Format(const char *volumename, BytesPerSector bytespersector, uint8_t
 
     memcpy(bootsector_buffer,&bpb,sizeof(bpb));
     
-    bootsector_buffer[510] = 0x55;
-    bootsector_buffer[511] = 0xAA;
+    memset(disk,0,bpb.BPB_BytsPerSec);
+
+    memcpy(disk,&bpb,sizeof(bpb));
+
+    uint8_t magic_bytes[2]={0x55,0xAA};
+    memcpy(disk+510,magic_bytes,sizeof(magic_bytes));
 
 
-    WriteSector(0,(uint8_t*)bootsector_buffer,bpb.BPB_BytsPerSec);
     ClearFAT();
-
+    InitRootDir();
     return 0;
 
+}
+
+int FAT12::CreateDir(const char name[8],const char extension[3], Directory parent)
+{
+    FileEntry dir;
+    size_t namelen = strnlen(name,8);
+    size_t extensionlen = strnlen(extension,3);
+    memset(dir.DIR_Name,0x20,8);
+    memcpy(dir.DIR_Name,name,namelen);
+    
+    memset(dir.DIR_Name+8,0x20,3);
+    memcpy(dir.DIR_Name+8,extension,extensionlen);
+    dir.DIR_NTRes = 0;
+    dir.DIR_CrtTimeTenth = 0;
+    dir.DIR_CrtTime = 0;
+    dir.DIR_CrtDate = 0;
+    dir.DIR_LstAccDate = 0;
+    dir.DIR_FstClusHI = 0;
+    dir.DIR_Attr = ATTR_DIRECTORY;
+    uint16_t firstcluster = GetNextFreeCluster();
+    SetFAT12_entry(firstcluster,0xfff);
+    if(firstcluster == 0)return ERROR;
+
+    dir.DIR_FstClusLO = firstcluster;
+    dir.DIR_FileSize = 0;
+
+    FileHandle newdirhandle;
+    if(AllocateNewEntryInDir(parent,&newdirhandle) == ERROR)return ERROR;
+
+    memcpy(disk + 
+        OffsetToCluster(newdirhandle.direntry) + 
+        (newdirhandle.dirindex* sizeof(FileEntry)),
+        &dir,
+        sizeof(dir)
+    );
+
+    FileEntry dot = dir;
+    memset(dot.DIR_Name,0x20,sizeof(dot.DIR_Name));
+    
+    memcpy(dot.DIR_Name,".",1);
+
+    memcpy(disk + 
+        OffsetToCluster(dot.DIR_FstClusLO),
+        &dot,
+        sizeof(dot)
+    );
+
+
+
+    return OK;
+
+
+}
+
+int FAT12::SectorSerialDump(size_t index)
+{   
+    if(!(index < bpb.BPB_TotSec16))return ERROR;
+    uint8_t buf[bpb.BPB_BytsPerSec];
+
+    memcpy(buf,disk+(index*bpb.BPB_BytsPerSec),bpb.BPB_BytsPerSec);
+    
+    
+    for(unsigned int i = 0; i < bpb.BPB_BytsPerSec; i++){
+        printf(" %X",buf[i]);
+        if((i+1)%32 == 0){
+            printf("\n");
+        }
+    }
+    return OK;
 }
 
 int FAT12::Mount()
@@ -285,8 +368,8 @@ int FAT12::Mount()
     
     int result = ReadFirst512bytes(&bpb);
     bool fat12 = IsFAT12(&bpb);
-    
-    return 0;
+    if(fat12 && (result==OK))return OK;
+    return ERROR;
 }
 
 
