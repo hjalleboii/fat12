@@ -72,10 +72,11 @@ int FAT12::ClearFAT()
 {
     uint8_t buffer[bpb.BPB_FATSz16*bpb.BPB_BytsPerSec]={0};
     
+    memset(disk+(bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec),0,(bpb.BPB_FATSz16*bpb.BPB_BytsPerSec));
+    
     SetFAT12_entry(0,0xFF8);
     SetFAT12_entry(1,0xFFF);
 
-    memset(disk+(bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec),0,(bpb.BPB_FATSz16*bpb.BPB_BytsPerSec));
     return 0;
     
 }
@@ -84,11 +85,8 @@ FatIterator FAT12::IterateFat(FatIterator *it)
 {
     uint16_t newval = GetFAT12_entry(*it);
     
-    if (newval==0xfff){
-        *it = 0;
-    }else{
-        *it = newval;
-    }
+    *it = newval;
+
     return *it;
 }
 
@@ -131,9 +129,12 @@ uint16_t FAT12::GetNextFreeCluster()
     uint32_t freeclusters = 0;
     for(uint32_t i =0; i < (bpb.BPB_TotSec16-(bpb.BPB_RsvdSecCnt +bpb.BPB_NumFATs*bpb.BPB_FATSz16))/bpb.BPB_SecPerClus; i++){
         if(GetFAT12_entry(i) == 0){
+            PRINT_i(GetFAT12_entry(i));
+            PRINT_i(i);
             return i;
         }
     }
+    printf("Keine neue kluster finded\n");
     return 0;
 }
 
@@ -147,8 +148,25 @@ int FAT12::ClearCluster(uint16_t index)
 }
 
 size_t FAT12::OffsetToCluster(uint16_t index)
+{   
+    size_t RootDirSectors = (bpb.BPB_RootEntCnt*sizeof(FileEntry) / bpb.BPB_BytsPerSec);
+    size_t RootDirOffset = bpb.BPB_RsvdSecCnt + (bpb.BPB_NumFATs * bpb.BPB_FATSz16);
+    size_t FirstDataSector = RootDirOffset + RootDirSectors;
+    size_t FirstSectorofCluster = ((index - 2) * bpb.BPB_SecPerClus) + FirstDataSector;
+
+    size_t offset = FirstSectorofCluster * bpb.BPB_BytsPerSec;
+
+    if (index < 2){
+        offset = RootDirOffset * bpb.BPB_BytsPerSec;
+    }
+    //size_t offset = (bpb.BPB_RsvdSecCnt + (bpb.BPB_FATSz16 * bpb.BPB_NumFATs) + index*bpb.BPB_SecPerClus) * bpb.BPB_BytsPerSec;
+    printf("Fat Index %i -> offset %i\n",index,offset);
+    return offset;
+}
+
+size_t FAT12::OffsetToFileHandle(FileHandle filehandle)
 {
-    return (bpb.BPB_RsvdSecCnt + (bpb.BPB_FATSz16 * bpb.BPB_NumFATs) + index*bpb.BPB_SecPerClus) * bpb.BPB_BytsPerSec;
+    return OffsetToCluster(filehandle.direntry) + filehandle.dirindex*sizeof(FileEntry);
 }
 
 bool FAT12::IsFAT12(const BPB *bpb)
@@ -206,16 +224,21 @@ uint32_t FAT12::GetFreeDiskSpaceAmount()
 int FAT12::AllocateNewEntryInDir(Directory dir, FileHandle *out_entry)
 {
     FatIterator lastent;
-    for(FatIterator ent = dir.fat_entry; ent!=0; IterateFat(&ent)){
+    for(FatIterator ent = dir.fat_entry; ent<0xff8; IterateFat(&ent)){
+        printf("ent %u\n",ent);
         for(uint16_t i = 0;
         i < bpb.BPB_SecPerClus*bpb.BPB_BytsPerSec/sizeof(FileEntry);
         i++){
             uint8_t fbyte;
             memcpy(&fbyte,disk + OffsetToCluster(ent) + i * sizeof(FileEntry),sizeof(fbyte) );
+            printf("Fbyte: %u\n",fbyte);
+
             if(fbyte ==  0xE5 || fbyte == 0x00){
                 *out_entry = FileHandle{ent, i};
+                
                 return OK;
             }
+
         }
         lastent = ent;
     }
@@ -293,6 +316,63 @@ int FAT12::Format(const char *volumename, BytesPerSector bytespersector, uint8_t
     return 0;
 
 }
+int FAT12::CreateFile(const char name[8], const char extension[3], Directory parent,FileHandle* filehandle)
+{
+    FileEntry file;
+    size_t namelen = strnlen(name,8);
+    size_t extensionlen = strnlen(extension,3);
+    memset(file.DIR_Name,0x20,8);
+    memcpy(file.DIR_Name,name,namelen);
+
+    memset(file.DIR_Name+8,0x20,3);
+    memcpy(file.DIR_Name+8,extension,extensionlen);
+    file.DIR_NTRes = 0;
+    file.DIR_CrtTimeTenth = 0;
+    file.DIR_CrtTime = 0;
+    file.DIR_CrtDate = 0;
+    file.DIR_LstAccDate = 0;
+    file.DIR_FstClusHI = 0;
+    file.DIR_Attr = 0;
+    
+
+    file.DIR_FstClusLO = 0x00;
+    file.DIR_FileSize = 0;
+    
+    FileHandle newfilehandle;
+    if(AllocateNewEntryInDir(parent,&newfilehandle) == ERROR)return ERROR;
+
+    uint16_t firstcluster = GetNextFreeCluster();
+    if(firstcluster == 0)return ERROR;
+
+    file.DIR_FstClusLO = firstcluster;
+    SetFAT12_entry(firstcluster,END_OF_FILE);
+    
+    memcpy(disk +
+        OffsetToFileHandle(newfilehandle),
+        &file,
+        sizeof(file)
+    );
+    *filehandle = newfilehandle;
+    return OK;
+}
+int FAT12::DeleteFile(FileHandle *filehandle)
+{
+    
+    FileEntry fentry;
+    printf("Filehandle offset: %i\n",OffsetToFileHandle(*filehandle));
+    memcpy(&fentry,disk + OffsetToFileHandle(*filehandle),sizeof(fentry));
+    memset(disk + OffsetToFileHandle(*filehandle),0xE5,sizeof(fentry));
+    uint16_t fat = fentry.DIR_FstClusLO;
+    
+    while(fat > 0 && fat < 0xff8){
+        uint16_t nextfat = GetFAT12_entry(fat);
+        SetFAT12_entry(fat,0);
+        memset(disk + OffsetToCluster(fat),0,bpb.BPB_BytsPerSec*bpb.BPB_SecPerClus);
+        fat = nextfat;
+    }
+   
+    return 0;
+}
 
 int FAT12::CreateDir(const char name[8],const char extension[3], Directory parent)
 {
@@ -301,7 +381,7 @@ int FAT12::CreateDir(const char name[8],const char extension[3], Directory paren
     size_t extensionlen = strnlen(extension,3);
     memset(dir.DIR_Name,0x20,8);
     memcpy(dir.DIR_Name,name,namelen);
-    
+
     memset(dir.DIR_Name+8,0x20,3);
     memcpy(dir.DIR_Name+8,extension,extensionlen);
     dir.DIR_NTRes = 0;
@@ -321,22 +401,39 @@ int FAT12::CreateDir(const char name[8],const char extension[3], Directory paren
     FileHandle newdirhandle;
     if(AllocateNewEntryInDir(parent,&newdirhandle) == ERROR)return ERROR;
 
-    memcpy(disk + 
-        OffsetToCluster(newdirhandle.direntry) + 
+    memcpy(disk +
+        OffsetToCluster(newdirhandle.direntry) +
         (newdirhandle.dirindex* sizeof(FileEntry)),
         &dir,
         sizeof(dir)
     );
 
+    FileHandle df{dir.DIR_FstClusLO,0};
+    FileHandle ddf{dir.DIR_FstClusLO,1};
+
     FileEntry dot = dir;
     memset(dot.DIR_Name,0x20,sizeof(dot.DIR_Name));
-    
+
     memcpy(dot.DIR_Name,".",1);
 
-    memcpy(disk + 
-        OffsetToCluster(dot.DIR_FstClusLO),
+    memcpy(disk +
+        OffsetToFileHandle(df),
         &dot,
         sizeof(dot)
+    );
+
+    FileEntry dotdot = dot;
+    memset(dotdot.DIR_Name,0x20,sizeof(dot.DIR_Name));
+    memcpy(dotdot.DIR_Name,"..",2);
+
+    dotdot.DIR_FstClusLO = parent.fat_entry;
+
+    FileHandle dotdotf{};
+  
+    memcpy(disk +
+        OffsetToFileHandle(ddf),
+        &dotdot,
+        sizeof(dotdot)
     );
 
 
@@ -345,6 +442,7 @@ int FAT12::CreateDir(const char name[8],const char extension[3], Directory paren
 
 
 }
+
 
 int FAT12::SectorSerialDump(size_t index)
 {   
@@ -355,11 +453,12 @@ int FAT12::SectorSerialDump(size_t index)
     
     
     for(unsigned int i = 0; i < bpb.BPB_BytsPerSec; i++){
-        printf(" %X",buf[i]);
+        printf(" %02X",buf[i]);
         if((i+1)%32 == 0){
             printf("\n");
         }
     }
+    printf("\n");
     return OK;
 }
 

@@ -107,6 +107,8 @@ class FAT12{
     uint16_t GetNextFreeCluster();
     int ClearCluster(uint16_t index);
     size_t OffsetToCluster(uint16_t index);
+    size_t OffsetToFileHandle(FileHandle filehandle);
+
 public:
     FAT12(uint8_t* disk,size_t disk_size);
     
@@ -114,7 +116,9 @@ public:
     int AllocateNewEntryInDir(Directory dir, FileHandle* out_entry);
     int Format(const char* volumename, BytesPerSector bytespersector,uint8_t SectorPerClusters, bool dual_FATs);
     int CreateDir(const char name[8],const char extension[3],Directory parent);
-
+    
+    int CreateFile(const char name[8],const char extension[3],Directory parent,FileHandle* filehandle);
+    int DeleteFile(FileHandle* filehandle);
     //File Open(const char* filepath,uint8_t mode);
     //int Read(File& file,uint8_t * buffer, size_t buffersize);
     //int Write(File& file,uint8_t * buffer, size_t buffersize);
