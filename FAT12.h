@@ -80,6 +80,8 @@ enum Status{
     ERROR,
     NO_MAGICBYTES,
     NULLPOINTER_PROVIDED,
+    OUT_OF_SPACE,
+    INDEX_OUT_OF_RANGE,
     END
 };
 
@@ -90,44 +92,83 @@ enum BytesPerSector{
     B4096=4096
 };
 
-
+template<typename T>
+struct Result {
+    int status;
+    T val;
+    inline bool Ok(){
+        return status == 0;
+    }
+};
+struct none{};
 
 class FAT12{
     public:
     uint8_t* disk;
     size_t disk_size;
     BPB bpb;
-    uint16_t GetFAT12_entry(size_t index);
-    int SetFAT12_entry(size_t index,uint16_t value);
-    int ReadFirst512bytes(BPB*out);
+    Result<uint16_t> GetFAT12_entry(size_t index);
+    Result<none> SetFAT12_entry(size_t index,uint16_t value);
+    Result<none> ReadFirst512bytes(BPB*out);
     static bool IsFAT12(const BPB*bpb);
-    int ClearFAT();
+    Result<none> ClearFAT();
     FatIterator IterateFat(FatIterator* it);
-    int InitRootDir();
-    uint16_t GetNextFreeCluster();
-    int ClearCluster(uint16_t index);
-    size_t OffsetToCluster(uint16_t index);
-    size_t OffsetToFileHandle(FileHandle filehandle);
-
+    Result<none> InitRootDir();
+    Result<uint16_t> GetNextFreeCluster();
+    Result<none> ClearCluster(uint16_t index);
+    Result<size_t> OffsetToCluster(uint16_t index);
+    Result<size_t> OffsetToFileHandle(FileHandle filehandle);
+    inline size_t OffsetToFat();
+    inline size_t OffsetToRootDir();
+    inline size_t OffsetToFirstCluster();
+    inline size_t RootDirSize();
+    inline size_t FatSize();
+    size_t GetNumberOfValidFatEntries();
 public:
     FAT12(uint8_t* disk,size_t disk_size);
     
     uint32_t GetFreeDiskSpaceAmount();
     int AllocateNewEntryInDir(Directory dir, FileHandle* out_entry);
-    int Format(const char* volumename, BytesPerSector bytespersector,uint8_t SectorPerClusters, bool dual_FATs);
-    int CreateDir(const char name[8],const char extension[3],Directory parent);
+    Result<none> Format(const char* volumename, BytesPerSector bytespersector,uint8_t SectorPerClusters, bool dual_FATs);
+    Result<none> CreateDir(const char name[8],const char extension[3],Directory parent);
     
-    int CreateFile(const char name[8],const char extension[3],Directory parent,FileHandle* filehandle);
-    int DeleteFile(FileHandle* filehandle);
+    Result<none> CreateFile(const char name[8],const char extension[3],Directory parent,FileHandle* filehandle);
+    Result<none> DeleteFile(FileHandle* filehandle);
     //File Open(const char* filepath,uint8_t mode);
     //int Read(File& file,uint8_t * buffer, size_t buffersize);
     //int Write(File& file,uint8_t * buffer, size_t buffersize);
     int SectorSerialDump(size_t index);
 
-    int Mount();
+    Result<none> Mount();
 
 
 };
+inline size_t FAT12::OffsetToFat()
+{
+    return bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec;
+}
 
+inline size_t FAT12::OffsetToRootDir()
+{
+    return OffsetToFat() + FatSize();
+}
 
+inline size_t FAT12::OffsetToFirstCluster()
+{
+    return OffsetToRootDir()+RootDirSize();
+}
 
+inline size_t FAT12::RootDirSize()
+{
+    return bpb.BPB_RootEntCnt*sizeof(FileEntry);
+}
+
+inline size_t FAT12::FatSize()
+{
+    return bpb.BPB_NumFATs * bpb.BPB_FATSz16 * bpb.BPB_BytsPerSec;
+}
+
+inline size_t FAT12::GetNumberOfValidFatEntries()
+{
+    return (bpb.BPB_TotSec16*bpb.BPB_BytsPerSec - OffsetToFirstCluster())/(bpb.BPB_SecPerClus*bpb.BPB_BytsPerSec) + 2;
+}
