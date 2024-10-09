@@ -14,7 +14,7 @@
 
 #define ATTR_LONG_NAME  (ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID)
 
-#define LAST_LONG_NAME 0x40
+#define LAST_LONG_ENTRY 0x40
 
 
 #define FILE_IO_READ 0x01
@@ -163,12 +163,19 @@ class FAT12{
     inline size_t FatSize()const;
     inline size_t GetNumberOfValidFatEntries()const;
     inline size_t GetAllocationUnitSize()const;
+    inline size_t GetNumberOfFileEntriesPerCluster()const;
+
     Result<FileEntry*> GetFileEntryFromHanlde(FileHandle filehandle, FileEntry * fileentryout);
     bool FatIteratorOK(FatIterator it);
     bool DirIsDotOrDotDot(FileEntry *fileentry);
 
-    
+
+    int CreateShortNameFromLongName(char* shortname_out, const char* longname, size_t longname_len);
+
     uint8_t LongNameChecksum(const char shortname[11]);
+
+    Result<none> CreateLongFileNameEntry(const char* name, size_t len, Directory dir, FileHandle* filehandle);
+    Result<none> AllocateMultipleEntriesInDir(Directory dir,size_t count,FileHandle* first, FileHandle* last);
 
 public:
     FAT12(uint8_t* disk,size_t disk_size);
@@ -225,3 +232,9 @@ inline size_t FAT12::GetAllocationUnitSize() const
 {
     return bpb.BPB_BytsPerSec*bpb.BPB_SecPerClus;
 }
+
+inline size_t FAT12::GetNumberOfFileEntriesPerCluster() const
+{
+    return bpb.BPB_BytsPerSec*bpb.BPB_SecPerClus/sizeof(FileEntry);
+}
+

@@ -259,6 +259,165 @@ bool FAT12::DirIsDotOrDotDot(FileEntry *fileentry)
     return false;
 }
 
+Result<none> FAT12::CreateLongFileNameEntry(const char *name, size_t len, Directory dir, FileHandle *filehandle)
+{
+    size_t number_of_longname_entries = (len - 1)/13 + 1;
+    
+    FileHandle first,last;
+    if(!AllocateMultipleEntriesInDir(dir,number_of_longname_entries + 1, &first, &last).Ok())return {ERROR};
+
+    FileEntry fileentry;
+    memset(&fileentry,0,sizeof(fileentry));
+
+    //CreateShortNameFromLongName(fileentry.DIR_Name,name,len);
+    memcpy(fileentry.DIR_Name,"NEGER\x20\x20\x20TXT",11);
+    auto newcluster_res = GetNextFreeCluster();
+    if(!newcluster_res.Ok())return {ERROR};
+    uint16_t newcluster = newcluster_res.val;
+    fileentry.DIR_FstClusLO = newcluster;
+    SetFAT12_entry(newcluster,END_OF_FILE);
+
+    fileentry.DIR_Attr=ATTR_ARCHIVE;
+    
+
+    LongNameEntry longnamebuf;
+    longnamebuf.LDIR_Attr= ATTR_LONG_NAME;
+    longnamebuf.LDIR_Chksum = LongNameChecksum(fileentry.DIR_Name);
+    longnamebuf.LDIR_FstClusLO = 0;
+    longnamebuf.LDIR_Type = 0;
+    longnamebuf.LDIR_ord = LAST_LONG_ENTRY | number_of_longname_entries;
+
+    FileHandle cur = first;
+    size_t ol = len - (len%GetNumberOfFileEntriesPerCluster());
+
+    
+    for(unsigned int i = 0; i < number_of_longname_entries; i++){
+        memset(longnamebuf.LDIR_Name1,0,10);
+        memset(longnamebuf.LDIR_Name2,0,12);
+        memset(longnamebuf.LDIR_Name3,0,4);
+        ol = len - (len%13) - (i*13);
+        printf("OL: %u\n",ol);
+        for(uint8_t j = 0; j < 5; j++){
+            if(ol<len){
+                longnamebuf.LDIR_Name1[j*2] = *(name+ol);
+            }else if(ol >len){
+                longnamebuf.LDIR_Name1[j*2] = 0xff;
+                longnamebuf.LDIR_Name1[j*2+1] = 0xff;
+            }
+            ol++;
+        }
+        for(uint8_t j = 0; j < 6; j++){
+            if(ol<len){
+                longnamebuf.LDIR_Name2[j*2] = *(name+ol);
+            }else if(ol >len){
+                longnamebuf.LDIR_Name2[j*2] = 0xff;
+                longnamebuf.LDIR_Name2[j*2+1] = 0xff;
+            }
+            ol++;
+        }
+        for(uint8_t j = 0; j < 2 ; j++){
+            if(ol<len){
+                longnamebuf.LDIR_Name3[j*2] = *(name+ol);
+            }else if(ol >len){
+                longnamebuf.LDIR_Name3[j*2] = 0xff;
+                longnamebuf.LDIR_Name3[j*2+1] = 0xff;
+            }
+            ol++;
+        }
+
+        auto offset_to_dl = OffsetToFileHandle(cur);
+        if(!offset_to_dl.Ok())return {ERROR};
+        memcpy(disk+offset_to_dl.val,&longnamebuf,sizeof(longnamebuf));
+
+        longnamebuf.LDIR_ord = number_of_longname_entries -1 -i;
+
+        cur.dirindex += 1;
+        if(cur.dirindex == GetNumberOfFileEntriesPerCluster()){
+            auto nextentry_res = GetFAT12_entry(cur.direntry);
+            if(!nextentry_res.Ok())return {ERROR};
+            cur.direntry = nextentry_res.val;
+            cur.dirindex = 0;
+        }
+    }
+    auto offset_to_ffe = OffsetToFileHandle(last);
+    if(!offset_to_ffe.Ok())return {ERROR};
+    memcpy(disk+offset_to_ffe.val,&fileentry,sizeof(fileentry));
+    *filehandle = last;
+    return {OK};
+}
+
+Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, FileHandle *first, FileHandle *last)
+{
+    FatIterator lastent;
+
+    size_t empty_entries_found = 0;
+    for(FatIterator ent = dir.fat_entry; ent<0xff8; IterateFat(&ent)){
+        for(uint16_t i = 0;
+        i < GetNumberOfFileEntriesPerCluster();
+        i++){
+            uint8_t fbyte;
+            auto offset = OffsetToCluster(ent);
+            if(!offset.Ok())return {ERROR};
+            memcpy(&fbyte,disk + offset.val + i * sizeof(FileEntry),sizeof(fbyte) );
+            printf("Fbyte: %u\n",fbyte);
+
+            if(fbyte ==  0xE5 || fbyte == 0x00){
+                if(empty_entries_found == 0){
+                    *first = FileHandle{ent, i};
+                }
+                empty_entries_found += 1;
+                
+                if(empty_entries_found == count){
+                    *last = FileHandle{ent,i};
+                    return {OK};
+                }
+            }else{
+                empty_entries_found = 0;
+            }
+
+        }
+        lastent = ent;
+    }
+    size_t entries_left = count - empty_entries_found;
+    
+    for(size_t i = 0; i < (entries_left-1)/GetNumberOfFileEntriesPerCluster() +1; i++ ){
+        
+        auto newcluster = GetNextFreeCluster();
+        if(!newcluster.Ok())return {ERROR};
+        SetFAT12_entry(lastent,newcluster.val);
+        SetFAT12_entry(newcluster.val,0xfff);
+        for(uint16_t j=0; j < GetNumberOfFileEntriesPerCluster(); j++){
+            if(empty_entries_found == 0){
+                *first = FileHandle{newcluster.val, j};
+            }
+            empty_entries_found += 1;
+            if(empty_entries_found == count){
+                *last = FileHandle{newcluster.val,j};
+                return {OK};
+            }
+        }
+        lastent = newcluster.val;
+    }
+
+    
+    return {OK};
+
+}
+
+uint8_t FAT12::LongNameChecksum(const char shortname[11])
+{
+    short FcbNameLen;
+    const unsigned char* pFcbName = (const unsigned char*)shortname;
+    unsigned char Sum;
+    Sum = 0;
+    for (FcbNameLen=11; FcbNameLen!=0; FcbNameLen--) {
+    // NOTE: The operation is an unsigned char rotate right
+    Sum = ((Sum & 1) ? 0x80 : 0) + (Sum >> 1) + *pFcbName++;
+    }
+    return (Sum); 
+
+}
+
 uint32_t FAT12::GetFreeDiskSpaceAmount()
 {   
     uint32_t freeclusters = 0;
@@ -308,6 +467,8 @@ Result<none> FAT12::AllocateNewEntryInDir(Directory dir, FileHandle *out_entry)
     return {OK};
 
 }
+
+
 
 Result<none> FAT12::Format(const char *volumename, BytesPerSector bytespersector, uint8_t SectorPerClusters, bool dual_FATs)
 {
@@ -693,3 +854,182 @@ void BPB::print()
 
 
 
+/*
+
+
+int FAT12::CreateShortNameFromLongName(char *shortname_out, const char *longname, size_t longname_len)
+{   
+    size_t ol = 0;
+    for(size_t i = 0; i < MIN(11,longname_len) && ol < longname_len; i++){
+        char out = 0;
+        while(out==0 && ol < longname_len){
+            char in = *(longname+ol);
+            if('A' <= in  &&  in <='Z'){
+                out = in;
+            }
+            if('a' <= in &&  in <='z'){
+                out = in -32;
+            }
+            if('0' <= in && in <= '9'){
+                out = in;
+            }
+            ol += 1;
+        }
+    }
+    return OK;
+}
+
+uint8_t FAT12::LongNameChecksum(const char shortname[11])
+{
+    short FcbNameLen;
+    const unsigned char* pFcbName = (const unsigned char*)shortname;
+    unsigned char Sum;
+    Sum = 0;
+    for (FcbNameLen=11; FcbNameLen!=0; FcbNameLen--) {
+    // NOTE: The operation is an unsigned char rotate right
+    Sum = ((Sum & 1) ? 0x80 : 0) + (Sum >> 1) + *pFcbName++;
+    }
+    return (Sum); 
+
+}
+
+int FAT12::CreateLongFileNameEntry(const char *name, size_t len, Directory dir, FileHandle *filehandle)
+{
+    size_t number_of_longname_entries = (len - 1)/13 + 1;
+    
+    FileHandle first,last;
+    if(AllocateMultipleEntriesInDir(dir,number_of_longname_entries + 1, &first, &last) != OK)return ERROR;
+
+    FileEntry fileentry;
+    memset(&fileentry,0,sizeof(fileentry));
+
+    //CreateShortNameFromLongName(fileentry.DIR_Name,name,len);
+    memcpy(fileentry.DIR_Name,"NEGER\x20\x20\x20TXT",11);
+    uint16_t newcluster = GetNextFreeCluster();
+    if(newcluster == 0)return ERROR;
+    fileentry.DIR_FstClusLO = newcluster;
+    SetFAT12_entry(newcluster,END_OF_FILE);
+
+    fileentry.DIR_Attr=ATTR_ARCHIVE;
+    
+
+    LongNameEntry longnamebuf;
+    longnamebuf.LDIR_Attr= ATTR_LONG_NAME;
+    longnamebuf.LDIR_Chksum = LongNameChecksum(fileentry.DIR_Name);
+    longnamebuf.LDIR_FstClusLO = 0;
+    longnamebuf.LDIR_Type = 0;
+    longnamebuf.LDIR_ord = LAST_LONG_ENTRY | number_of_longname_entries;
+
+    FileHandle cur = first;
+    size_t ol = len - (len%GetNumberOfFileEntriesPerCluster());
+
+    
+    for(unsigned int i = 0; i < number_of_longname_entries; i++){
+        memset(longnamebuf.LDIR_Name1,0,10);
+        memset(longnamebuf.LDIR_Name2,0,12);
+        memset(longnamebuf.LDIR_Name3,0,4);
+        ol = len - (len%13) - (i*13);
+        printf("OL: %u\n",ol);
+        for(uint8_t j = 0; j < 5; j++){
+            if(ol<len){
+                longnamebuf.LDIR_Name1[j*2] = *(name+ol);
+            }else if(ol >len){
+                longnamebuf.LDIR_Name1[j*2] = 0xff;
+                longnamebuf.LDIR_Name1[j*2+1] = 0xff;
+            }
+            ol++;
+        }
+        for(uint8_t j = 0; j < 6; j++){
+            if(ol<len){
+                longnamebuf.LDIR_Name2[j*2] = *(name+ol);
+            }else if(ol >len){
+                longnamebuf.LDIR_Name2[j*2] = 0xff;
+                longnamebuf.LDIR_Name2[j*2+1] = 0xff;
+            }
+            ol++;
+        }
+        for(uint8_t j = 0; j < 2 ; j++){
+            if(ol<len){
+                longnamebuf.LDIR_Name3[j*2] = *(name+ol);
+            }else if(ol >len){
+                longnamebuf.LDIR_Name3[j*2] = 0xff;
+                longnamebuf.LDIR_Name3[j*2+1] = 0xff;
+            }
+            ol++;
+        }
+
+
+        memcpy(disk+OffsetToFileHandle(cur),&longnamebuf,sizeof(longnamebuf));
+
+        longnamebuf.LDIR_ord = number_of_longname_entries -1 -i;
+
+        cur.dirindex += 1;
+        if(cur.dirindex == GetNumberOfFileEntriesPerCluster()){
+            cur.direntry = GetFAT12_entry(cur.direntry);
+            if(cur.direntry==0)return ERROR;
+            cur.dirindex = 0;
+        }
+    }
+    memcpy(disk+OffsetToFileHandle(last),&fileentry,sizeof(fileentry));
+    *filehandle = last;
+    return OK;
+
+}
+
+
+int FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, FileHandle *first, FileHandle *last)
+{
+    FatIterator lastent;
+
+    size_t empty_entries_found = 0;
+    for(FatIterator ent = dir.fat_entry; ent<0xff8; IterateFat(&ent)){
+        for(uint16_t i = 0;
+        i < GetNumberOfFileEntriesPerCluster();
+        i++){
+            uint8_t fbyte;
+            memcpy(&fbyte,disk + OffsetToCluster(ent) + i * sizeof(FileEntry),sizeof(fbyte) );
+            printf("Fbyte: %u\n",fbyte);
+
+            if(fbyte ==  0xE5 || fbyte == 0x00){
+                if(empty_entries_found == 0){
+                    *first = FileHandle{ent, i};
+                }
+                empty_entries_found += 1;
+                
+                if(empty_entries_found == count){
+                    *last = FileHandle{ent,i};
+                    return OK;
+                }
+            }else{
+                empty_entries_found = 0;
+            }
+
+        }
+        lastent = ent;
+    }
+    size_t entries_left = count - empty_entries_found;
+    
+    for(size_t i = 0; i < (entries_left-1)/GetNumberOfFileEntriesPerCluster() +1; i++ ){
+        
+        uint16_t newcluster = GetNextFreeCluster();
+        if(!newcluster)return ERROR;
+        SetFAT12_entry(lastent,newcluster);
+        SetFAT12_entry(newcluster,0xfff);
+        for(uint16_t j=0; j < GetNumberOfFileEntriesPerCluster(); j++){
+            if(empty_entries_found == 0){
+                *first = FileHandle{newcluster, j};
+            }
+            empty_entries_found += 1;
+            if(empty_entries_found == count){
+                *last = FileHandle{newcluster,j};
+                return OK;
+            }
+        }
+        lastent = newcluster;
+    }
+
+    
+    return OK;
+}
+
+*/
