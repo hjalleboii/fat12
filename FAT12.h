@@ -12,6 +12,9 @@
 #define ATTR_ARCHIVE   0x20
 
 
+#define LAST_LONG_NAME 0x40
+
+
 #define FILE_IO_READ 0x01
 #define FILE_IO_WRITE 0x02
 
