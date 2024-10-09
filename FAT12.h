@@ -12,6 +12,8 @@
 #define ATTR_ARCHIVE   0x20
 
 
+#define ATTR_LONG_NAME  (ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID)
+
 #define LAST_LONG_NAME 0x40
 
 
@@ -69,6 +71,17 @@ struct FileEntry{
   
 };
 
+
+struct LongNameEntry{
+    uint8_t LDIR_ord;
+    char LDIR_Name1[10];
+    uint8_t LDIR_Attr;
+    uint8_t LDIR_Type;// zero
+    uint8_t LDIR_Chksum;
+    char LDIR_Name2[12];
+    uint16_t LDIR_FstClusLO; // zero
+    char LDIR_Name3[4];
+};
 
 
 #pragma pop
@@ -153,6 +166,10 @@ class FAT12{
     Result<FileEntry*> GetFileEntryFromHanlde(FileHandle filehandle, FileEntry * fileentryout);
     bool FatIteratorOK(FatIterator it);
     bool DirIsDotOrDotDot(FileEntry *fileentry);
+
+    
+    uint8_t LongNameChecksum(const char shortname[11]);
+
 public:
     FAT12(uint8_t* disk,size_t disk_size);
     
