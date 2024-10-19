@@ -25,6 +25,22 @@ Result<uint16_t> FAT12::GetFAT12_entry(size_t index)
     return {OK,number};
 }
 
+Result<uint16_t> FAT12::GetFAT12_reverse_entry(size_t value)
+{
+
+    for(uint16_t i = 2; i < GetNumberOfValidFatEntries(); i++){
+        auto entry = GetFAT12_entry(i);
+        if(!entry.Ok()){
+            return {ERROR};
+        }
+        if(entry.val == value){
+            return {OK,i};
+        }
+    }
+
+    return {OK,END_OF_FILE};
+}
+
 Result<none> FAT12::SetFAT12_entry(size_t index, uint16_t value)
 {
 
@@ -189,7 +205,39 @@ Result<size_t> FAT12::OffsetToFileHandle(FileHandle filehandle)
     return {OK, offsettocluster + filehandle.dirindex*sizeof(FileEntry)};
 }
 
+Result<FileHandle> FAT12::GetNextEntryInDir(FileHandle fh)
+{
+    size_t entriesincluster = GetNumberOfFileEntriesPerCluster(fh.direntry);
+    fh.dirindex +=1;
+    if( fh.dirindex >= entriesincluster){
+        fh.dirindex = 0;
+        auto next_entry = GetFAT12_entry(fh.direntry);
+        if(!next_entry.Ok()){
+            return {ERROR};
+        }
+        fh.direntry = next_entry.val;
+    }
+    return {OK,fh};
+}
 
+Result<FileHandle> FAT12::GetPreviousEntryInDir(FileHandle fh)
+{
+    if(fh.dirindex != 0){
+        fh.dirindex -=1;
+    }else{
+        fh.dirindex = 0;
+        auto next_entry = GetFAT12_reverse_entry(fh.direntry);
+        if(!next_entry.Ok()){
+            return {ERROR};
+        }
+        fh.direntry = next_entry.val;
+        
+        size_t entriesincluster = GetNumberOfFileEntriesPerCluster(fh.direntry);
+        fh.dirindex = entriesincluster -1;
+    }
+    return {OK,fh};
+    
+}
 
 bool FAT12::IsFAT12(const BPB *bpb)
 {
@@ -288,8 +336,7 @@ Result<none> FAT12::CreateLongFileNameEntry(const char *name, size_t len, Direct
     longnamebuf.LDIR_ord = LAST_LONG_ENTRY | number_of_longname_entries;
 
     FileHandle cur = first;
-    size_t ol = len - (len%GetNumberOfFileEntriesPerCluster());
-
+    size_t ol;
     
     for(unsigned int i = 0; i < number_of_longname_entries; i++){
         memset(longnamebuf.LDIR_Name1,0,10);
@@ -332,7 +379,7 @@ Result<none> FAT12::CreateLongFileNameEntry(const char *name, size_t len, Direct
         longnamebuf.LDIR_ord = number_of_longname_entries -1 -i;
 
         cur.dirindex += 1;
-        if(cur.dirindex == GetNumberOfFileEntriesPerCluster()){
+        if(cur.dirindex == GetNumberOfFileEntriesPerCluster(cur.direntry)){
             auto nextentry_res = GetFAT12_entry(cur.direntry);
             if(!nextentry_res.Ok())return {ERROR};
             cur.direntry = nextentry_res.val;
@@ -353,7 +400,7 @@ Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, Fi
     size_t empty_entries_found = 0;
     for(FatIterator ent = dir.fat_entry; ent<0xff8; IterateFat(&ent)){
         for(uint16_t i = 0;
-        i < GetNumberOfFileEntriesPerCluster();
+        i < GetNumberOfFileEntriesPerCluster(ent);
         i++){
             uint8_t fbyte;
             auto offset = OffsetToCluster(ent);
@@ -380,13 +427,13 @@ Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, Fi
     }
     size_t entries_left = count - empty_entries_found;
     
-    for(size_t i = 0; i < (entries_left-1)/GetNumberOfFileEntriesPerCluster() +1; i++ ){
+    while(empty_entries_found<count){
         
         auto newcluster = GetNextFreeCluster();
         if(!newcluster.Ok())return {ERROR};
         SetFAT12_entry(lastent,newcluster.val);
         SetFAT12_entry(newcluster.val,0xfff);
-        for(uint16_t j=0; j < GetNumberOfFileEntriesPerCluster(); j++){
+        for(uint16_t j=0; j < GetNumberOfFileEntriesPerCluster(newcluster.val); j++){
             if(empty_entries_found == 0){
                 *first = FileHandle{newcluster.val, j};
             }
@@ -579,15 +626,91 @@ Result<none> FAT12::CreateFile(const char name[8], const char extension[3], Dire
     *filehandle = newfilehandle;
     return {OK};
 }
-Result<none> FAT12::DeleteFile(FileHandle *filehandle)
+Result<none> FAT12::DeleteFile(FileHandle filehandle)
 {
     
     FileEntry fentry;
-    printf("Filehandle offset: %i\n",OffsetToFileHandle(*filehandle));
-    auto offset_to_filehandle = OffsetToFileHandle(*filehandle);
+    bool haslongname = false;
+    printf("Filehandle offset: %i\n",OffsetToFileHandle(filehandle));
+    auto offset_to_filehandle = OffsetToFileHandle(filehandle);
     if(!offset_to_filehandle.Ok()){return {ERROR};}
 
     memcpy(&fentry,disk +offset_to_filehandle.val ,sizeof(fentry));
+
+
+    uint8_t lname_chk;
+
+    FileHandle ffilehandle = filehandle;
+
+    
+
+    if(fentry.DIR_Attr == ATTR_LONG_NAME){
+        LongNameEntry longname_entry;
+        memcpy(&longname_entry, &fentry, sizeof(LongNameEntry));
+        lname_chk = longname_entry.LDIR_Chksum;
+        uint16_t entriestofileentry = (longname_entry.LDIR_Attr & (~0x40));
+        for(size_t i = 0; i < entriestofileentry; i++){
+            auto nextfh = GetNextEntryInDir(ffilehandle);
+            if(!nextfh.Ok())return{ERROR};
+            ffilehandle = nextfh.val;
+        }
+        auto ffo = OffsetToFileHandle(ffilehandle);
+        if(!ffo.Ok()){
+            return {ERROR};
+        }
+        memcpy(&fentry,disk +ffo.val,sizeof(fentry) );
+        if(lname_chk == LongNameChecksum(fentry.DIR_Name)){
+            return {LONGFILEENTRY_IS_CORRUPTED};
+        };
+        haslongname = true;
+    }else{
+        lname_chk = LongNameChecksum(fentry.DIR_Name);
+    }
+
+
+    if(!haslongname){
+        auto prev_fh = GetPreviousEntryInDir(filehandle);
+        if(prev_fh.Ok()){
+            LongNameEntry lname_entry;
+            auto offset_res = OffsetToFileHandle(prev_fh.val);
+            memcpy(&lname_entry,disk+offset_res.val, sizeof(lname_entry));
+            if(lname_entry.LDIR_Attr == ATTR_LONG_NAME){
+                haslongname = true;
+            }
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////CONTIUE TO WORK HERE HJALMAR
+    //implement code the finds the first filehandle with the first longname entry! It is needed to delete the full file entry!
+    FileHandle lastfh = filehandle;
+    if(haslongname){
+        while (1)
+        {
+            LongNameEntry entry_buffer;
+            auto offset_to_eb = OffsetToFileHandle(lastfh);
+            if(!offset_to_eb.Ok()){return{ERROR};}
+            memcpy(&entry_buffer, disk +offset_to_eb.val,sizeof(entry_buffer));
+            if(entry_buffer.LDIR_Attr == ATTR_LONG_NAME && (entry_buffer.LDIR_ord & 0x40)){
+                break;
+            }
+        }
+    }
+
+    {
+        LongNameEntry first_lne_buf;
+        auto offset_first_lne_buf = OffsetToFileHandle(filehandle);
+        if((!offset_first_lne_buf.Ok()) && haslongname)return {ERROR};
+
+        memcpy(&first_lne_buf,disk+offset_first_lne_buf.val,sizeof(first_lne_buf));
+        if(first_lne_buf.LDIR_Attr == ATTR_LONG_NAME){
+
+        }else{
+
+        }
+    }
+
+
+
     if(fentry.DIR_Attr & ATTR_DIRECTORY){
         auto empty = DirectoryEmpty({fentry.DIR_FstClusLO});
         if(!(empty.Ok() && empty.val)){
@@ -595,7 +718,9 @@ Result<none> FAT12::DeleteFile(FileHandle *filehandle)
         }
     };
 
-    memset(disk + offset_to_filehandle.val,0xE5,sizeof(fentry));
+    memset(disk + offset_to_filehandle.val,0xE5,sizeof(fentry)); // this might need some change too!
+
+
 
 
     uint16_t fat = fentry.DIR_FstClusLO;
@@ -851,185 +976,3 @@ void BPB::print()
     PRINT_X(BS_BootSig);
     PRINT_X(BS_VolID);
 }
-
-
-
-/*
-
-
-int FAT12::CreateShortNameFromLongName(char *shortname_out, const char *longname, size_t longname_len)
-{   
-    size_t ol = 0;
-    for(size_t i = 0; i < MIN(11,longname_len) && ol < longname_len; i++){
-        char out = 0;
-        while(out==0 && ol < longname_len){
-            char in = *(longname+ol);
-            if('A' <= in  &&  in <='Z'){
-                out = in;
-            }
-            if('a' <= in &&  in <='z'){
-                out = in -32;
-            }
-            if('0' <= in && in <= '9'){
-                out = in;
-            }
-            ol += 1;
-        }
-    }
-    return OK;
-}
-
-uint8_t FAT12::LongNameChecksum(const char shortname[11])
-{
-    short FcbNameLen;
-    const unsigned char* pFcbName = (const unsigned char*)shortname;
-    unsigned char Sum;
-    Sum = 0;
-    for (FcbNameLen=11; FcbNameLen!=0; FcbNameLen--) {
-    // NOTE: The operation is an unsigned char rotate right
-    Sum = ((Sum & 1) ? 0x80 : 0) + (Sum >> 1) + *pFcbName++;
-    }
-    return (Sum); 
-
-}
-
-int FAT12::CreateLongFileNameEntry(const char *name, size_t len, Directory dir, FileHandle *filehandle)
-{
-    size_t number_of_longname_entries = (len - 1)/13 + 1;
-    
-    FileHandle first,last;
-    if(AllocateMultipleEntriesInDir(dir,number_of_longname_entries + 1, &first, &last) != OK)return ERROR;
-
-    FileEntry fileentry;
-    memset(&fileentry,0,sizeof(fileentry));
-
-    //CreateShortNameFromLongName(fileentry.DIR_Name,name,len);
-    memcpy(fileentry.DIR_Name,"NEGER\x20\x20\x20TXT",11);
-    uint16_t newcluster = GetNextFreeCluster();
-    if(newcluster == 0)return ERROR;
-    fileentry.DIR_FstClusLO = newcluster;
-    SetFAT12_entry(newcluster,END_OF_FILE);
-
-    fileentry.DIR_Attr=ATTR_ARCHIVE;
-    
-
-    LongNameEntry longnamebuf;
-    longnamebuf.LDIR_Attr= ATTR_LONG_NAME;
-    longnamebuf.LDIR_Chksum = LongNameChecksum(fileentry.DIR_Name);
-    longnamebuf.LDIR_FstClusLO = 0;
-    longnamebuf.LDIR_Type = 0;
-    longnamebuf.LDIR_ord = LAST_LONG_ENTRY | number_of_longname_entries;
-
-    FileHandle cur = first;
-    size_t ol = len - (len%GetNumberOfFileEntriesPerCluster());
-
-    
-    for(unsigned int i = 0; i < number_of_longname_entries; i++){
-        memset(longnamebuf.LDIR_Name1,0,10);
-        memset(longnamebuf.LDIR_Name2,0,12);
-        memset(longnamebuf.LDIR_Name3,0,4);
-        ol = len - (len%13) - (i*13);
-        printf("OL: %u\n",ol);
-        for(uint8_t j = 0; j < 5; j++){
-            if(ol<len){
-                longnamebuf.LDIR_Name1[j*2] = *(name+ol);
-            }else if(ol >len){
-                longnamebuf.LDIR_Name1[j*2] = 0xff;
-                longnamebuf.LDIR_Name1[j*2+1] = 0xff;
-            }
-            ol++;
-        }
-        for(uint8_t j = 0; j < 6; j++){
-            if(ol<len){
-                longnamebuf.LDIR_Name2[j*2] = *(name+ol);
-            }else if(ol >len){
-                longnamebuf.LDIR_Name2[j*2] = 0xff;
-                longnamebuf.LDIR_Name2[j*2+1] = 0xff;
-            }
-            ol++;
-        }
-        for(uint8_t j = 0; j < 2 ; j++){
-            if(ol<len){
-                longnamebuf.LDIR_Name3[j*2] = *(name+ol);
-            }else if(ol >len){
-                longnamebuf.LDIR_Name3[j*2] = 0xff;
-                longnamebuf.LDIR_Name3[j*2+1] = 0xff;
-            }
-            ol++;
-        }
-
-
-        memcpy(disk+OffsetToFileHandle(cur),&longnamebuf,sizeof(longnamebuf));
-
-        longnamebuf.LDIR_ord = number_of_longname_entries -1 -i;
-
-        cur.dirindex += 1;
-        if(cur.dirindex == GetNumberOfFileEntriesPerCluster()){
-            cur.direntry = GetFAT12_entry(cur.direntry);
-            if(cur.direntry==0)return ERROR;
-            cur.dirindex = 0;
-        }
-    }
-    memcpy(disk+OffsetToFileHandle(last),&fileentry,sizeof(fileentry));
-    *filehandle = last;
-    return OK;
-
-}
-
-
-int FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, FileHandle *first, FileHandle *last)
-{
-    FatIterator lastent;
-
-    size_t empty_entries_found = 0;
-    for(FatIterator ent = dir.fat_entry; ent<0xff8; IterateFat(&ent)){
-        for(uint16_t i = 0;
-        i < GetNumberOfFileEntriesPerCluster();
-        i++){
-            uint8_t fbyte;
-            memcpy(&fbyte,disk + OffsetToCluster(ent) + i * sizeof(FileEntry),sizeof(fbyte) );
-            printf("Fbyte: %u\n",fbyte);
-
-            if(fbyte ==  0xE5 || fbyte == 0x00){
-                if(empty_entries_found == 0){
-                    *first = FileHandle{ent, i};
-                }
-                empty_entries_found += 1;
-                
-                if(empty_entries_found == count){
-                    *last = FileHandle{ent,i};
-                    return OK;
-                }
-            }else{
-                empty_entries_found = 0;
-            }
-
-        }
-        lastent = ent;
-    }
-    size_t entries_left = count - empty_entries_found;
-    
-    for(size_t i = 0; i < (entries_left-1)/GetNumberOfFileEntriesPerCluster() +1; i++ ){
-        
-        uint16_t newcluster = GetNextFreeCluster();
-        if(!newcluster)return ERROR;
-        SetFAT12_entry(lastent,newcluster);
-        SetFAT12_entry(newcluster,0xfff);
-        for(uint16_t j=0; j < GetNumberOfFileEntriesPerCluster(); j++){
-            if(empty_entries_found == 0){
-                *first = FileHandle{newcluster, j};
-            }
-            empty_entries_found += 1;
-            if(empty_entries_found == count){
-                *last = FileHandle{newcluster,j};
-                return OK;
-            }
-        }
-        lastent = newcluster;
-    }
-
-    
-    return OK;
-}
-
-*/

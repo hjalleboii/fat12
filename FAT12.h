@@ -120,6 +120,7 @@ enum Status{
     OUT_OF_SPACE,
     INDEX_OUT_OF_RANGE,
     DIRECTORY_NOT_EMPTY,
+    LONGFILEENTRY_IS_CORRUPTED,
     END
 };
 
@@ -146,6 +147,7 @@ class FAT12{
     size_t disk_size;
     BPB bpb;
     Result<uint16_t> GetFAT12_entry(size_t index);
+    Result<uint16_t> GetFAT12_reverse_entry(size_t value);
     Result<none> SetFAT12_entry(size_t index,uint16_t value);
     Result<none> ReadFirst512bytes(BPB*out);
     static bool IsFAT12(const BPB*bpb);
@@ -156,6 +158,10 @@ class FAT12{
     Result<none> ClearCluster(uint16_t index);
     Result<size_t> OffsetToCluster(uint16_t index);
     Result<size_t> OffsetToFileHandle(FileHandle filehandle);
+    Result<FileHandle> GetNextEntryInDir(FileHandle fh);
+    Result<FileHandle> GetPreviousEntryInDir(FileHandle fh);
+
+    inline size_t GetSizeOfCluster(uint16_t cluster)const;
     inline size_t OffsetToFat()const;
     inline size_t OffsetToRootDir()const;
     inline size_t OffsetToFirstCluster()const;
@@ -163,7 +169,7 @@ class FAT12{
     inline size_t FatSize()const;
     inline size_t GetNumberOfValidFatEntries()const;
     inline size_t GetAllocationUnitSize()const;
-    inline size_t GetNumberOfFileEntriesPerCluster()const;
+    inline size_t GetNumberOfFileEntriesPerCluster(size_t cluster) const;
 
     Result<FileEntry*> GetFileEntryFromHanlde(FileHandle filehandle, FileEntry * fileentryout);
     bool FatIteratorOK(FatIterator it);
@@ -177,6 +183,7 @@ class FAT12{
     Result<none> CreateLongFileNameEntry(const char* name, size_t len, Directory dir, FileHandle* filehandle);
     Result<none> AllocateMultipleEntriesInDir(Directory dir,size_t count,FileHandle* first, FileHandle* last);
 
+
 public:
     FAT12(uint8_t* disk,size_t disk_size);
     
@@ -187,7 +194,7 @@ public:
     Result<bool> DirectoryEmpty(Directory directory);
     Result<none> CreateFile(const char name[8],const char extension[3],Directory parent,FileHandle* filehandle);
 
-    Result<none> DeleteFile(FileHandle* filehandle);
+    Result<none> DeleteFile(FileHandle filehandle);
     Result<FileIOHandle> Open(FileHandle file, uint8_t mode);
     Result<none> Close(FileIOHandle* file);
     int Read(FileIOHandle& file,uint8_t * buffer, size_t buffersize);
@@ -198,7 +205,14 @@ public:
 
 
 };
-inline size_t FAT12::OffsetToFat()const
+inline size_t FAT12::GetSizeOfCluster(uint16_t cluster)const
+{
+    if(cluster == 0){
+        return RootDirSize();
+    }
+    return GetAllocationUnitSize() ;
+}
+inline size_t FAT12::OffsetToFat() const
 {
     return bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec;
 }
@@ -233,8 +247,8 @@ inline size_t FAT12::GetAllocationUnitSize() const
     return bpb.BPB_BytsPerSec*bpb.BPB_SecPerClus;
 }
 
-inline size_t FAT12::GetNumberOfFileEntriesPerCluster() const
+inline size_t FAT12::GetNumberOfFileEntriesPerCluster(size_t cluster) const
 {
-    return bpb.BPB_BytsPerSec*bpb.BPB_SecPerClus/sizeof(FileEntry);
+    return GetSizeOfCluster(cluster)/sizeof(FileEntry);
 }
 
