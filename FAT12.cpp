@@ -693,6 +693,9 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
             if(entry_buffer.LDIR_Attr == ATTR_LONG_NAME && (entry_buffer.LDIR_ord & 0x40)){
                 break;
             }
+            auto new_lastfh = GetPreviousEntryInDir(lastfh);
+            if(!new_lastfh.Ok()){return{ERROR};}
+            lastfh = new_lastfh.val;
         }
     }
 
@@ -717,8 +720,18 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
             return {DIRECTORY_NOT_EMPTY};
         }
     };
+    bool finished = false;
+    while(!finished){
+        finished = memcmp(&lastfh, &ffilehandle,sizeof(FileHandle)) == 0;
 
-    memset(disk + offset_to_filehandle.val,0xE5,sizeof(fentry)); // this might need some change too!
+        auto offset = OffsetToFileHandle(lastfh);
+        if(!offset.Ok()){return {ERROR};}
+        memset(disk + offset.val,0xE5,sizeof(FileEntry)); // this might need some change too!
+        auto next = GetNextEntryInDir(lastfh);
+        if(!next.Ok()){return {ERROR};}
+        lastfh = next.val;
+    }
+
 
 
 
