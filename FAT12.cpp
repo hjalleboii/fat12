@@ -684,7 +684,7 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
     //implement code the finds the first filehandle with the first longname entry! It is needed to delete the full file entry!
     FileHandle lastfh = filehandle;
     if(haslongname){
-        while (1)
+        while (1) // todo set some max number of looping here
         {
             LongNameEntry entry_buffer;
             auto offset_to_eb = OffsetToFileHandle(lastfh);
