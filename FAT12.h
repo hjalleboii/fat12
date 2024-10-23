@@ -141,6 +141,9 @@ struct Result {
 };
 struct none{};
 
+#define HANDLE_ERROR(outtype,out,func,error) outtype out;{auto result = func;if(!result.Ok()){error;}out = result.val;}
+
+
 class FAT12{
     public:
     uint8_t* disk;
@@ -197,8 +200,8 @@ public:
     Result<none> DeleteFile(FileHandle filehandle);
     Result<FileIOHandle> Open(FileHandle file, uint8_t mode);
     Result<none> Close(FileIOHandle* file);
-    int Read(FileIOHandle& file,uint8_t * buffer, size_t buffersize);
-    //int Write(File& file,uint8_t * buffer, size_t buffersize);
+    Result<size_t> Read(FileIOHandle& file,uint8_t * buffer, size_t buffersize);
+    Result<size_t> Write(FileIOHandle& file,const uint8_t * buffer, size_t buffersize);
     int SectorSerialDump(size_t index);
 
     Result<none> Mount();

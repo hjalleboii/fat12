@@ -765,7 +765,7 @@ Result<FileIOHandle> FAT12::Open(FileHandle file, uint8_t mode)
     if(mode & FILE_MODE_WRITE){
         fileio.mode = FILE_IO_WRITE;
         if(mode & FILE_MODE_APP){
-            panic("you are gay");
+            panic("file mode append not supported yeet");
         }else{
             fileio.currentoffset = 0;
             fileio.currentAU = entry.DIR_FstClusLO;
@@ -795,10 +795,11 @@ Result<FileIOHandle> FAT12::Open(FileHandle file, uint8_t mode)
 
 Result<none> FAT12::Close(FileIOHandle *file)
 {
-    return Result<none>();
+    memset(file,0,sizeof(FileIOHandle));
+    return {OK};
 }
 
-int FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersize)
+Result<size_t> FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersize)
 {
     size_t read = 0;
     FileEntry entry;
@@ -818,7 +819,7 @@ int FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersize)
         size_t readsize = MIN(MIN(possible_read_buffer,possible_read_file),possible_read_sector);
         
         auto clusteroffset = OffsetToCluster(file.currentAU);
-        if(!clusteroffset.Ok()){return 0;};
+        if(!clusteroffset.Ok()){return {ERROR};};
         PRINT_i(clusteroffset.val);
         memcpy(buffer+read,disk+clusteroffset.val +offsetintosector, readsize);
         PRINT_i(read);
@@ -831,7 +832,58 @@ int FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersize)
             IterateFat(&file.currentAU);
         }
     }
-    return read;
+    return {OK,read};
+}
+
+Result<size_t> FAT12::Write(FileIOHandle &file,const uint8_t *buffer, size_t buffersize)
+{
+    size_t offset_into_buffer = 0;
+    if(!(file.mode & FILE_IO_WRITE)){return {ERROR};};
+
+    while(offset_into_buffer < buffersize){
+
+        
+        size_t offset_in_sector = file.currentoffset%GetAllocationUnitSize();
+
+        
+
+        auto offset_to_cluster = OffsetToCluster(file.currentAU);
+        if(!offset_to_cluster.Ok()){
+            return {ERROR};
+        }
+
+        size_t maxwrite = MIN(GetAllocationUnitSize()-offset_in_sector,buffersize);
+
+        memcpy(disk + offset_to_cluster.val+offset_in_sector,buffer+offset_into_buffer,maxwrite);
+        offset_into_buffer += maxwrite;
+        file.currentoffset += maxwrite;
+        offset_in_sector += maxwrite;
+
+        if(offset_in_sector >= GetAllocationUnitSize()){
+            auto next = GetFAT12_entry(file.currentAU);
+            if(!next.Ok())return{ERROR};
+            if(next.val == END_OF_FILE){
+
+                auto next_free_cluster = GetNextFreeCluster();
+                if(!next_free_cluster.Ok()){
+                    return {ERROR};
+                }
+                SetFAT12_entry(file.currentAU,next_free_cluster.val);
+                SetFAT12_entry(next_free_cluster.val,END_OF_FILE);
+                file.currentAU = next_free_cluster.val;
+            }else{
+                file.currentAU = next.val;
+            }
+        }
+    }
+    FileEntry entry;
+    auto offset_entry = OffsetToFileHandle(file.handle);
+    if(!offset_entry.Ok()){return {OK};};
+    memcpy(&entry,disk + offset_entry.val,sizeof(FileEntry));
+    entry.DIR_FileSize = MAX(entry.DIR_FileSize, file.currentoffset);
+    memcpy(disk + offset_entry.val,&entry,sizeof(FileEntry));
+    return {OK,buffersize};
+
 }
 
 Result<none> FAT12::CreateDir(const char name[8],const char extension[3], Directory parent,FileHandle* filehandle)
