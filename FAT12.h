@@ -1,3 +1,6 @@
+#ifndef FAT12_H
+#define FAT12_H
+
 #include <stdint.h>
 #include <pico/stdlib.h>
 #include <string>
@@ -255,3 +258,4 @@ inline size_t FAT12::GetNumberOfFileEntriesPerCluster(size_t cluster) const
     return GetSizeOfCluster(cluster)/sizeof(FileEntry);
 }
 
+#endif
