@@ -89,12 +89,8 @@ Result<none> FAT12::ReadFirst512bytes(BPB *out)
 
 
 
-Result<none> FAT12::ClearFAT()
-{
-    uint8_t buffer[bpb.BPB_FATSz16*bpb.BPB_BytsPerSec]={0};
-    
-    memset(disk+(bpb.BPB_RsvdSecCnt * bpb.BPB_BytsPerSec),0,(bpb.BPB_FATSz16*bpb.BPB_BytsPerSec));
-    
+Result<none> FAT12::InitFAT()
+{    
     SetFAT12_entry(0,0xFF8);
     SetFAT12_entry(1,0xFFF);
 
@@ -569,7 +565,7 @@ Result<none> FAT12::Format(const char *volumename, BytesPerSector bytespersector
 
     memcpy(bootsector_buffer,&bpb,sizeof(bpb));
     
-    memset(disk,0,bpb.BPB_BytsPerSec);
+    memset(disk,0,disk_size);// clears the whole drive
 
     memcpy(disk,&bpb,sizeof(bpb));
 
@@ -577,7 +573,7 @@ Result<none> FAT12::Format(const char *volumename, BytesPerSector bytespersector
     memcpy(disk+510,magic_bytes,sizeof(magic_bytes));
 
 
-    ClearFAT();
+    InitFAT();
     InitRootDir();
     return {OK};
 

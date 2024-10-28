@@ -157,7 +157,7 @@ class FAT12{
     Result<none> SetFAT12_entry(size_t index,uint16_t value);
     Result<none> ReadFirst512bytes(BPB*out);
     static bool IsFAT12(const BPB*bpb);
-    Result<none> ClearFAT();
+    Result<none> InitFAT();
     FatIterator IterateFat(FatIterator* it);
     Result<none> InitRootDir();
     Result<uint16_t> GetNextFreeCluster();
