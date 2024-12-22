@@ -313,8 +313,9 @@ Result<none> FAT12::CreateLongFileNameEntry(const char *name, size_t len, Direct
     FileEntry fileentry;
     memset(&fileentry,0,sizeof(fileentry));
 
-    //CreateShortNameFromLongName(fileentry.DIR_Name,name,len);
-    memcpy(fileentry.DIR_Name,"NEGER\x20\x20\x20TXT",11);
+    CreateShortNameFromLongName(fileentry.DIR_Name,name,len,dir);
+
+    //memcpy(fileentry.DIR_Name,,11);
     auto newcluster_res = GetNextFreeCluster();
     if(!newcluster_res.Ok())return {ERROR};
     uint16_t newcluster = newcluster_res.val;
@@ -447,13 +448,158 @@ Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, Fi
 
 }
 
-uint8_t FAT12::LongNameChecksum(const char shortname[11])
+Result<FileHandle> FAT12::GetShortNameInDir(Directory dir, const char *shortname, size_t shortname_len)
+{
+    FileHandle fh{dir.fat_entry,0};
+    FileEntry fe_buf{0};
+    while(true){
+        {
+        if(GetFileEntryFromHanlde(fh,&fe_buf).Ok()){
+            if(fe_buf.DIR_Attr == ATTR_LONG_NAME)continue;
+            if(memcmp(shortname,fe_buf.DIR_Name,MIN(shortname_len,sizeof(fe_buf.DIR_Name)))==0){
+                return {OK,fh};
+            };
+        }else{
+            return {ERROR};
+        };
+        auto res_fh = GetNextEntryInDir(fh);
+        if(res_fh.Ok()){
+            fh = res_fh.val;
+        }else{
+            break;
+        }
+        }
+    }
+    return {FILE_DOES_NOT_EXIST};
+}
+
+Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, size_t longname_len)
+{
+    FileHandle fh {dir.fat_entry,0};
+    FileHandle csfh {dir.fat_entry,0};
+    LongNameEntry lne_buf{0};
+    while(1){
+        printf("1\n");
+        while (1)
+        {
+            printf("1.1\n");
+            GetFileEntryFromHanlde(csfh,(FileEntry*)&lne_buf);
+
+            if(lne_buf.LDIR_Attr == ATTR_LONG_NAME && (lne_buf.LDIR_ord & 0x40)){
+                break;
+            }
+
+            {
+                auto next_res = GetNextEntryInDir(csfh);
+                if(!next_res.Ok())return {ERROR};
+                csfh = next_res.val;
+            }
+        }
+        
+        printf("2\n");
+        
+        size_t offsetinname = 0;
+        uint32_t lne_count = lne_buf.LDIR_ord%0x40;
+        for(;lne_count > 0;lne_count--){
+            size_t bigoffsetinname = (lne_count-1)*13;
+            
+            if(longname_len<bigoffsetinname){
+                break;
+            }
+            
+            size_t offset_in_block = 0;
+            char n1[10]{0xff};
+            
+
+            char n2[12]{0xff};
+            
+            char n3[4]{0xff};
+
+            for(size_t i = 0; i < 5 && bigoffsetinname+offset_in_block<=longname_len; i++,offset_in_block++){
+                memset(n1+2*i,0,2);
+                if(bigoffsetinname+offset_in_block< longname_len){
+                    memcpy(n1+2*i,longname+bigoffsetinname+offset_in_block,1);
+                }
+            }
+            for(size_t i = 0; i < 5 && bigoffsetinname+offset_in_block<=longname_len; i++,offset_in_block++){
+                memset(n2+2*i,0,2);
+                if(bigoffsetinname+offset_in_block< longname_len){
+                    memcpy(n2+2*i,longname+bigoffsetinname+offset_in_block,1);
+                }
+            }
+            for(size_t i = 0; i < 5 && bigoffsetinname+offset_in_block<=longname_len; i++,offset_in_block++){
+                memset(n2+2*i,0,2);
+                if(bigoffsetinname+offset_in_block< longname_len){
+                    memcpy(n2+2*i,longname+bigoffsetinname+offset_in_block,1);
+                }
+            }
+            
+            if(memcmp(n1,lne_buf.LDIR_Name1,sizeof(n1)) == 0 
+            && memcmp(n2,lne_buf.LDIR_Name2,sizeof(n2)) == 0
+            && memcmp(n3,lne_buf.LDIR_Name3,sizeof(n3)) == 0){
+        
+                auto next_res = GetNextEntryInDir(csfh);
+                if(!next_res.Ok())return {ERROR};
+                csfh = next_res.val;
+                
+                GetFileEntryFromHanlde(csfh,(FileEntry*)&lne_buf);
+            }else{
+                break;
+            }
+        }
+        printf("3\n");
+
+        if(lne_count == 0){
+
+            return {OK,csfh};////return the found values here
+        }else{
+            for(size_t i = 0; i < lne_count+1; i++){
+                auto next_res = GetNextEntryInDir(csfh);
+                if(!next_res.Ok())return {ERROR};
+                csfh = next_res.val;
+            }
+        }
+
+
+    }
+
+
+}
+
+Result<none> FAT12::CreateShortNameFromLongName(char *shortname_out, const char *longname, size_t longname_len, Directory dir)
+{
+    size_t shift = 0;
+    size_t offset = 0;
+    if(longname_len == 0)return {ERROR};
+    while(1){
+        memset(shortname_out,0x20,SHORTNAME_LEN);
+        size_t count = MIN(longname_len-shift,SHORTNAME_LEN);
+        for(unsigned int i = 0; i < count;i++){
+
+            shortname_out[i] = SHORTNAME_LEGAL_CHARACHTERS[(
+                (((uint8_t*)longname)[(i+shift)%longname_len] + offset)
+                %
+                sizeof(SHORTNAME_LEGAL_CHARACHTERS))];
+        }
+    
+        if(!GetShortNameInDir(dir,shortname_out,11).Ok()){
+            break;
+        }else{
+            shift += 1;
+            offset +=1;
+        }
+    }
+    return {OK};
+
+}
+
+uint8_t FAT12::LongNameChecksum(const char shortname[SHORTNAME_LEN])
 {
     short FcbNameLen;
     const unsigned char* pFcbName = (const unsigned char*)shortname;
     unsigned char Sum;
     Sum = 0;
-    for (FcbNameLen=11; FcbNameLen!=0; FcbNameLen--) {
+    for (FcbNameLen=SHORTNAME_LEN; FcbNameLen!=0; FcbNameLen--) {
     // NOTE: The operation is an unsigned char rotate right
     Sum = ((Sum & 1) ? 0x80 : 0) + (Sum >> 1) + *pFcbName++;
     }
@@ -627,12 +773,8 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
     
     FileEntry fentry;
     bool haslongname = false;
-    printf("Filehandle offset: %i\n",OffsetToFileHandle(filehandle));
-    auto offset_to_filehandle = OffsetToFileHandle(filehandle);
-    if(!offset_to_filehandle.Ok()){return {ERROR};}
 
-    memcpy(&fentry,disk +offset_to_filehandle.val ,sizeof(fentry));
-
+    if(!GetFileEntryFromHanlde(filehandle,&fentry).Ok())return {ERROR};
 
     uint8_t lname_chk;
 

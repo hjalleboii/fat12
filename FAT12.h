@@ -57,8 +57,14 @@ struct BPB{
 };
 
 
+
+
+const char SHORTNAME_LEGAL_CHARACHTERS[]="ABCDEFGHIJKLMNOPQRSTUVXYZ";
+
+#define SHORTNAME_LEN 11
+
 struct FileEntry{
-    char DIR_Name[11];
+    char DIR_Name[SHORTNAME_LEN];
     uint8_t DIR_Attr;
     uint8_t DIR_NTRes =0;//SHould always be 0
     uint8_t DIR_CrtTimeTenth; // 0 <= && <= 199
@@ -124,6 +130,7 @@ enum Status{
     INDEX_OUT_OF_RANGE,
     DIRECTORY_NOT_EMPTY,
     LONGFILEENTRY_IS_CORRUPTED,
+    FILE_DOES_NOT_EXIST,
     END
 };
 
@@ -182,14 +189,15 @@ class FAT12{
     bool DirIsDotOrDotDot(FileEntry *fileentry);
 
 
-    int CreateShortNameFromLongName(char* shortname_out, const char* longname, size_t longname_len);
+    Result<none> CreateShortNameFromLongName(char* shortname_out, const char* longname, size_t longname_len,Directory dir);
 
-    uint8_t LongNameChecksum(const char shortname[11]);
+    uint8_t LongNameChecksum(const char shortname[SHORTNAME_LEN]);
 
     Result<none> CreateLongFileNameEntry(const char* name, size_t len, Directory dir, FileHandle* filehandle);
     Result<none> AllocateMultipleEntriesInDir(Directory dir,size_t count,FileHandle* first, FileHandle* last);
 
-
+    Result<FileHandle> GetShortNameInDir(Directory dir, const char* shortname, size_t shortname_len);
+    Result<FileHandle> GetLongNameInDir(Directory dir, const char* longname, size_t longname_len);
 public:
     FAT12(uint8_t* disk,size_t disk_size);
     
