@@ -59,7 +59,7 @@ struct BPB{
 
 
 
-const char SHORTNAME_LEGAL_CHARACHTERS[]="ABCDEFGHIJKLMNOPQRSTUVXYZ";
+const char SHORTNAME_LEGAL_CHARACHTERS[]="ABCDEFGHIJKLMNOPQRSTUVXYZ$%'-_@~`!(){}^#&0123456789";
 
 #define SHORTNAME_LEN 11
 
@@ -190,7 +190,8 @@ class FAT12{
 
 
     Result<none> CreateShortNameFromLongName(char* shortname_out, const char* longname, size_t longname_len,Directory dir);
-
+    Result<none> ShortNameifyIfValid(char* shortname_out,const char* longname,size_t longname_len);
+     
     uint8_t LongNameChecksum(const char shortname[SHORTNAME_LEN]);
 
     Result<none> CreateLongFileNameEntry(const char* name, size_t len, Directory dir, FileHandle* filehandle);

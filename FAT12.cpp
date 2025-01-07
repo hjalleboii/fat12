@@ -184,7 +184,7 @@ Result<size_t> FAT12::OffsetToCluster(uint16_t index)
         offset = RootDirOffset * bpb.BPB_BytsPerSec;
     }
     //size_t offset = (bpb.BPB_RsvdSecCnt + (bpb.BPB_FATSz16 * bpb.BPB_NumFATs) + index*bpb.BPB_SecPerClus) * bpb.BPB_BytsPerSec;
-    printf("Fat Index %i -> offset %i\n",index,offset);
+    //printf("Fat Index %i -> offset %i\n",index,offset);
     return {OK,offset};
 }
 
@@ -211,6 +211,7 @@ Result<FileHandle> FAT12::GetNextEntryInDir(FileHandle fh)
         if(!next_entry.Ok()){
             return {ERROR};
         }
+        if(next_entry.val >= 0xff8)return {ERROR};
         fh.direntry = next_entry.val;
     }
     return {OK,fh};
@@ -453,13 +454,14 @@ Result<FileHandle> FAT12::GetShortNameInDir(Directory dir, const char *shortname
     FileHandle fh{dir.fat_entry,0};
     FileEntry fe_buf{0};
     while(true){
-        {
+        
         if(GetFileEntryFromHanlde(fh,&fe_buf).Ok()){
-            if(fe_buf.DIR_Attr == ATTR_LONG_NAME)continue;
-            if(memcmp(shortname,fe_buf.DIR_Name,MIN(shortname_len,sizeof(fe_buf.DIR_Name)))==0){
+            if(memcmp(shortname,fe_buf.DIR_Name,MIN(shortname_len,sizeof(fe_buf.DIR_Name)))==0 && fe_buf.DIR_Attr != ATTR_LONG_NAME){
                 return {OK,fh};
             };
+            printf("1\n");
         }else{
+
             return {ERROR};
         };
         auto res_fh = GetNextEntryInDir(fh);
@@ -468,7 +470,7 @@ Result<FileHandle> FAT12::GetShortNameInDir(Directory dir, const char *shortname
         }else{
             break;
         }
-        }
+        
     }
     return {FILE_DOES_NOT_EXIST};
 }
@@ -479,13 +481,13 @@ Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, 
     FileHandle csfh {dir.fat_entry,0};
     LongNameEntry lne_buf{0};
     while(1){
-        printf("1\n");
+        printf("-----NY search-----\n");
         while (1)
         {
-            printf("1.1\n");
             GetFileEntryFromHanlde(csfh,(FileEntry*)&lne_buf);
-
-            if(lne_buf.LDIR_Attr == ATTR_LONG_NAME && (lne_buf.LDIR_ord & 0x40)){
+        
+            
+            if(lne_buf.LDIR_Attr == ATTR_LONG_NAME && (lne_buf.LDIR_ord & 0x40) && lne_buf.LDIR_ord<(0x40<<1)){
                 break;
             }
 
@@ -496,44 +498,57 @@ Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, 
             }
         }
         
-        printf("2\n");
         
         size_t offsetinname = 0;
         uint32_t lne_count = lne_buf.LDIR_ord%0x40;
         for(;lne_count > 0;lne_count--){
+
             size_t bigoffsetinname = (lne_count-1)*13;
             
+            uint8_t* bbbbbb = (uint8_t*)&lne_buf;
+            PRINT_buf(bbbbbb,32,16);
             if(longname_len<bigoffsetinname){
                 break;
             }
             
             size_t offset_in_block = 0;
-            char n1[10]{0xff};
             
-
-            char n2[12]{0xff};
             
-            char n3[4]{0xff};
-
+            char n1[10];
+            memset(n1,0xff,sizeof(n1));
+            char n2[12];
+            memset(n2,0xff,sizeof(n2));
+            char n3[4];
+            memset(n3,0xff,sizeof(n3));
+            
+            PRINT_buf(n1,10,10);
+            PRINT_buf(n2,12,12);
+            PRINT_buf(n3,4,4);
             for(size_t i = 0; i < 5 && bigoffsetinname+offset_in_block<=longname_len; i++,offset_in_block++){
                 memset(n1+2*i,0,2);
                 if(bigoffsetinname+offset_in_block< longname_len){
                     memcpy(n1+2*i,longname+bigoffsetinname+offset_in_block,1);
                 }
             }
-            for(size_t i = 0; i < 5 && bigoffsetinname+offset_in_block<=longname_len; i++,offset_in_block++){
+            for(size_t i = 0; i < 6 && bigoffsetinname+offset_in_block<=longname_len; i++,offset_in_block++){
                 memset(n2+2*i,0,2);
                 if(bigoffsetinname+offset_in_block< longname_len){
                     memcpy(n2+2*i,longname+bigoffsetinname+offset_in_block,1);
                 }
             }
-            for(size_t i = 0; i < 5 && bigoffsetinname+offset_in_block<=longname_len; i++,offset_in_block++){
-                memset(n2+2*i,0,2);
+            for(size_t i = 0; i < 2 && bigoffsetinname+offset_in_block<=longname_len; i++,offset_in_block++){
+                memset(n3+2*i,0,2);
                 if(bigoffsetinname+offset_in_block< longname_len){
-                    memcpy(n2+2*i,longname+bigoffsetinname+offset_in_block,1);
+                    memcpy(n3+2*i,longname+bigoffsetinname+offset_in_block,1);
                 }
             }
             
+            
+            PRINT_buf(n1,10,10);
+            PRINT_buf(n2,12,12);
+            PRINT_buf(n3,4,4);
+
+
             if(memcmp(n1,lne_buf.LDIR_Name1,sizeof(n1)) == 0 
             && memcmp(n2,lne_buf.LDIR_Name2,sizeof(n2)) == 0
             && memcmp(n3,lne_buf.LDIR_Name3,sizeof(n3)) == 0){
@@ -547,10 +562,7 @@ Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, 
                 break;
             }
         }
-        printf("3\n");
-
         if(lne_count == 0){
-
             return {OK,csfh};////return the found values here
         }else{
             for(size_t i = 0; i < lne_count+1; i++){
@@ -592,6 +604,7 @@ Result<none> FAT12::CreateShortNameFromLongName(char *shortname_out, const char 
     return {OK};
 
 }
+
 
 uint8_t FAT12::LongNameChecksum(const char shortname[SHORTNAME_LEN])
 {
@@ -943,8 +956,8 @@ Result<size_t> FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersiz
     FileEntry entry;
     if(!GetFileEntryFromHanlde(file.handle,&entry).Ok()){return {ERROR};};
 
-    PRINT_i(file.currentAU);
-    PRINT_i(file.currentoffset);
+    //PRINT_i(file.currentAU);
+    //PRINT_i(file.currentoffset);
     while(read < buffersize && file.currentoffset < entry.DIR_FileSize){
         size_t offsetintosector = file.currentoffset%GetAllocationUnitSize();
         
@@ -958,11 +971,11 @@ Result<size_t> FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersiz
         
         auto clusteroffset = OffsetToCluster(file.currentAU);
         if(!clusteroffset.Ok()){return {ERROR};};
-        PRINT_i(clusteroffset.val);
+        //PRINT_i(clusteroffset.val);
         memcpy(buffer+read,disk+clusteroffset.val +offsetintosector, readsize);
-        PRINT_i(read);
-        PRINT_i(readsize);
-        PRINT_i(clusteroffset.val + offsetintosector);
+        //PRINT_i(read);
+        //PRINT_i(readsize);
+        //PRINT_i(clusteroffset.val + offsetintosector);
         file.currentoffset += readsize;
         read += readsize;
 
