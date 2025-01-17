@@ -481,7 +481,6 @@ Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, 
     FileHandle csfh {dir.fat_entry,0};
     LongNameEntry lne_buf{0};
     while(1){
-        printf("-----NY search-----\n");
         while (1)
         {
             GetFileEntryFromHanlde(csfh,(FileEntry*)&lne_buf);
@@ -574,7 +573,7 @@ Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, 
 
 
     }
-
+    return {ERROR};
 
 }
 
@@ -672,7 +671,7 @@ Result<none> FAT12::AllocateNewEntryInDir(Directory dir, FileHandle *out_entry)
 
 
 
-Result<none> FAT12::Format(const char *volumename, BytesPerSector bytespersector, uint8_t SectorPerClusters, bool dual_FATs)
+Result<none> FAT12::Format(const char *volumename, BytesPerSector bytespersector, uint8_t SectorPerClusters, bool dual_FATs, size_t SectorsInRootEntry)
 {
     bpb = BPB();
     bpb.BS_jmpBoot[0] = 0xEB;
@@ -901,6 +900,26 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
         }
     }
    
+    return {OK};
+}
+
+Result<none> FAT12::ClearContentsOfFile(FileHandle filehandle)
+{
+    FileEntry fe;
+    if(!GetFileEntryFromHanlde(filehandle,&fe).Ok()){
+        return {ERROR};
+    }
+    fe.DIR_FileSize = 0;
+    size_t fatent= fe.DIR_FstClusLO;
+    size_t nextfatent = 0;
+    while(nextfatent < 0xff8)
+    {
+        HANDLE_ERROR(,nextfatent,GetFAT12_entry(fatent),return {ERROR};);
+        ClearCluster(fatent);
+        SetFAT12_entry(fatent,0);
+    }
+    SetFAT12_entry(fe.DIR_FstClusLO,0xfff);
+    memcpy(disk+OffsetToFileHandle(filehandle).val,&fe,sizeof(fe));
     return {OK};
 }
 

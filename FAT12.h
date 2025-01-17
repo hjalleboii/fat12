@@ -204,12 +204,12 @@ public:
     
     uint32_t GetFreeDiskSpaceAmount();
     Result<none> AllocateNewEntryInDir(Directory dir, FileHandle* out_entry);
-    Result<none> Format(const char* volumename, BytesPerSector bytespersector,uint8_t SectorPerClusters, bool dual_FATs);
+    Result<none> Format(const char* volumename, BytesPerSector bytespersector,uint8_t SectorPerClusters, bool dual_FATs, size_t SectorsInRootEntry);
     Result<none> CreateDir(const char name[8],const char extension[3],Directory parent,FileHandle* filehandle);
     Result<bool> DirectoryEmpty(Directory directory);
     Result<none> CreateFile(const char name[8],const char extension[3],Directory parent,FileHandle* filehandle);
-
     Result<none> DeleteFile(FileHandle filehandle);
+    Result<none> ClearContentsOfFile(FileHandle filehandle);
     Result<FileIOHandle> Open(FileHandle file, uint8_t mode);
     Result<none> Close(FileIOHandle* file);
     Result<size_t> Read(FileIOHandle& file,uint8_t * buffer, size_t buffersize);
