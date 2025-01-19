@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <pico/stdlib.h>
-#include <string>
+#include <string.h>
 
 #define END_OF_FILE 0xfff
 
@@ -66,7 +66,7 @@ const char SHORTNAME_LEGAL_CHARACHTERS[]="ABCDEFGHIJKLMNOPQRSTUVXYZ$%'-_@~`!(){}
 struct FileEntry{
     char DIR_Name[SHORTNAME_LEN];
     uint8_t DIR_Attr;
-    uint8_t DIR_NTRes =0;//SHould always be 0
+    uint8_t DIR_NTRes;//SHould always be 0
     uint8_t DIR_CrtTimeTenth; // 0 <= && <= 199
     uint16_t DIR_CrtTime; // Granularity 2 secs
     uint16_t DIR_CrtDate;
@@ -121,7 +121,7 @@ struct FileIOHandle{
 
 typedef  uint16_t FatIterator;
 
-enum Status{
+enum class Fat12Status{
     OK,
     ERROR,
     NO_MAGICBYTES,

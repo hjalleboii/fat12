@@ -7,7 +7,7 @@
 Result<uint16_t> FAT12::GetFAT12_entry(size_t index)
 {
 
-    if(!(index < GetNumberOfValidFatEntries()))return {INDEX_OUT_OF_RANGE};
+    if(!(index < GetNumberOfValidFatEntries()))return {(int)Fat12Status::INDEX_OUT_OF_RANGE};
     size_t offset_bits = index * 12;
     //size_t bitoffset_intou16 = (index%2)*4;
     size_t bitsintobytes = offset_bits%8;
@@ -22,7 +22,7 @@ Result<uint16_t> FAT12::GetFAT12_entry(size_t index)
 
     number >>= bitsintobytes;
     number&=0x0fff;
-    return {OK,number};
+    return {(int)Fat12Status::OK,number};
 }
 
 Result<uint16_t> FAT12::GetFAT12_reverse_entry(size_t value)
@@ -31,20 +31,20 @@ Result<uint16_t> FAT12::GetFAT12_reverse_entry(size_t value)
     for(uint16_t i = 2; i < GetNumberOfValidFatEntries(); i++){
         auto entry = GetFAT12_entry(i);
         if(!entry.Ok()){
-            return {ERROR};
+            return {(int)Fat12Status::ERROR};
         }
         if(entry.val == value){
-            return {OK,i};
+            return {(int)Fat12Status::OK,i};
         }
     }
 
-    return {OK,END_OF_FILE};
+    return {(int)Fat12Status::OK,END_OF_FILE};
 }
 
 Result<none> FAT12::SetFAT12_entry(size_t index, uint16_t value)
 {
 
-    if(!(index < GetNumberOfValidFatEntries()))return {INDEX_OUT_OF_RANGE};
+    if(!(index < GetNumberOfValidFatEntries()))return {(int)Fat12Status::INDEX_OUT_OF_RANGE};
 
     size_t offset_bits = index * 12;
     size_t offset_bytes = offset_bits/8;
@@ -66,12 +66,12 @@ Result<none> FAT12::SetFAT12_entry(size_t index, uint16_t value)
 
     memcpy(disk+disk_offset,&twobytes,sizeof(twobytes));
 
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 
 Result<none> FAT12::ReadFirst512bytes(BPB *out)
 {
-    if(!out)return {NULLPOINTER_PROVIDED};
+    if(!out)return {(int)Fat12Status::NULLPOINTER_PROVIDED};
     uint8_t buffer[512];
 
     /// this can be changed to implement another disk type.
@@ -81,9 +81,9 @@ Result<none> FAT12::ReadFirst512bytes(BPB *out)
     memcpy(out,buffer,sizeof(BPB));
     const uint8_t magic_words[2] = {0x55, 0xAA};
     if(memcmp(buffer+510,magic_words,2)!=0){
-        return {NO_MAGICBYTES};
+        return {(int)Fat12Status::NO_MAGICBYTES};
     };
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 
 
@@ -94,7 +94,7 @@ Result<none> FAT12::InitFAT()
     SetFAT12_entry(0,0xFF8);
     SetFAT12_entry(1,0xFFF);
 
-    return {OK};
+    return {(int)Fat12Status::OK};
     
 }
 
@@ -143,7 +143,7 @@ Result<none> FAT12::InitRootDir()
         sizeof(volumelabel)
     );
 
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 
 Result<uint16_t> FAT12::GetNextFreeCluster()
@@ -154,21 +154,21 @@ Result<uint16_t> FAT12::GetNextFreeCluster()
             if(fat12entry.val == 0){
                 PRINT_i(GetFAT12_entry(i));
                 PRINT_i(i);
-                return {OK,i};
+                return {(int)Fat12Status::OK,i};
             }
         }
     }
-    return {OUT_OF_SPACE};
+    return {(int)Fat12Status::OUT_OF_SPACE};
 }
 
 Result<none> FAT12::ClearCluster(uint16_t index)
 {
     auto offsettocluster_res = OffsetToCluster(index);
     if(!offsettocluster_res.Ok()){
-        return {INDEX_OUT_OF_RANGE};
+        return {(int)Fat12Status::INDEX_OUT_OF_RANGE};
     }
     memset(disk + offsettocluster_res.val,0,bpb.BPB_BytsPerSec*bpb.BPB_SecPerClus);
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 
 Result<size_t> FAT12::OffsetToCluster(uint16_t index)
@@ -185,7 +185,7 @@ Result<size_t> FAT12::OffsetToCluster(uint16_t index)
     }
     //size_t offset = (bpb.BPB_RsvdSecCnt + (bpb.BPB_FATSz16 * bpb.BPB_NumFATs) + index*bpb.BPB_SecPerClus) * bpb.BPB_BytsPerSec;
     //printf("Fat Index %i -> offset %i\n",index,offset);
-    return {OK,offset};
+    return {(int)Fat12Status::OK,offset};
 }
 
 Result<size_t> FAT12::OffsetToFileHandle(FileHandle filehandle)
@@ -198,7 +198,7 @@ Result<size_t> FAT12::OffsetToFileHandle(FileHandle filehandle)
         return {offsettocluster_res.status};
     };
 
-    return {OK, offsettocluster + filehandle.dirindex*sizeof(FileEntry)};
+    return {(int)Fat12Status::OK, offsettocluster + filehandle.dirindex*sizeof(FileEntry)};
 }
 
 Result<FileHandle> FAT12::GetNextEntryInDir(FileHandle fh)
@@ -209,12 +209,12 @@ Result<FileHandle> FAT12::GetNextEntryInDir(FileHandle fh)
         fh.dirindex = 0;
         auto next_entry = GetFAT12_entry(fh.direntry);
         if(!next_entry.Ok()){
-            return {ERROR};
+            return {(int)Fat12Status::ERROR};
         }
-        if(next_entry.val >= 0xff8)return {ERROR};
+        if(next_entry.val >= 0xff8)return {(int)Fat12Status::ERROR};
         fh.direntry = next_entry.val;
     }
-    return {OK,fh};
+    return {(int)Fat12Status::OK,fh};
 }
 
 Result<FileHandle> FAT12::GetPreviousEntryInDir(FileHandle fh)
@@ -225,14 +225,14 @@ Result<FileHandle> FAT12::GetPreviousEntryInDir(FileHandle fh)
         fh.dirindex = 0;
         auto next_entry = GetFAT12_reverse_entry(fh.direntry);
         if(!next_entry.Ok()){
-            return {ERROR};
+            return {(int)Fat12Status::ERROR};
         }
         fh.direntry = next_entry.val;
         
         size_t entriesincluster = GetNumberOfFileEntriesPerCluster(fh.direntry);
         fh.dirindex = entriesincluster -1;
     }
-    return {OK,fh};
+    return {(int)Fat12Status::OK,fh};
     
 }
 
@@ -282,7 +282,7 @@ Result<FileEntry *> FAT12::GetFileEntryFromHanlde(FileHandle filehandle, FileEnt
     auto offset = OffsetToFileHandle(filehandle);
     if(!offset.Ok())return {offset.status};
     memcpy(fileentryout,disk + offset.val, sizeof(FileEntry));
-    return {OK,fileentryout};
+    return {(int)Fat12Status::OK,fileentryout};
 }
 
 
@@ -309,7 +309,7 @@ Result<none> FAT12::CreateLongFileNameEntry(const char *name, size_t len, Direct
     size_t number_of_longname_entries = (len - 1)/13 + 1;
     
     FileHandle first,last;
-    if(!AllocateMultipleEntriesInDir(dir,number_of_longname_entries + 1, &first, &last).Ok())return {ERROR};
+    if(!AllocateMultipleEntriesInDir(dir,number_of_longname_entries + 1, &first, &last).Ok())return {(int)Fat12Status::ERROR};
 
     FileEntry fileentry;
     memset(&fileentry,0,sizeof(fileentry));
@@ -318,7 +318,7 @@ Result<none> FAT12::CreateLongFileNameEntry(const char *name, size_t len, Direct
 
     //memcpy(fileentry.DIR_Name,,11);
     auto newcluster_res = GetNextFreeCluster();
-    if(!newcluster_res.Ok())return {ERROR};
+    if(!newcluster_res.Ok())return {(int)Fat12Status::ERROR};
     uint16_t newcluster = newcluster_res.val;
     fileentry.DIR_FstClusLO = newcluster;
     SetFAT12_entry(newcluster,END_OF_FILE);
@@ -371,7 +371,7 @@ Result<none> FAT12::CreateLongFileNameEntry(const char *name, size_t len, Direct
         }
 
         auto offset_to_dl = OffsetToFileHandle(cur);
-        if(!offset_to_dl.Ok())return {ERROR};
+        if(!offset_to_dl.Ok())return {(int)Fat12Status::ERROR};
         memcpy(disk+offset_to_dl.val,&longnamebuf,sizeof(longnamebuf));
 
         longnamebuf.LDIR_ord = number_of_longname_entries -1 -i;
@@ -379,16 +379,16 @@ Result<none> FAT12::CreateLongFileNameEntry(const char *name, size_t len, Direct
         cur.dirindex += 1;
         if(cur.dirindex == GetNumberOfFileEntriesPerCluster(cur.direntry)){
             auto nextentry_res = GetFAT12_entry(cur.direntry);
-            if(!nextentry_res.Ok())return {ERROR};
+            if(!nextentry_res.Ok())return {(int)Fat12Status::ERROR};
             cur.direntry = nextentry_res.val;
             cur.dirindex = 0;
         }
     }
     auto offset_to_ffe = OffsetToFileHandle(last);
-    if(!offset_to_ffe.Ok())return {ERROR};
+    if(!offset_to_ffe.Ok())return {(int)Fat12Status::ERROR};
     memcpy(disk+offset_to_ffe.val,&fileentry,sizeof(fileentry));
     *filehandle = last;
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 
 Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, FileHandle *first, FileHandle *last)
@@ -402,7 +402,7 @@ Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, Fi
         i++){
             uint8_t fbyte;
             auto offset = OffsetToCluster(ent);
-            if(!offset.Ok())return {ERROR};
+            if(!offset.Ok())return {(int)Fat12Status::ERROR};
             memcpy(&fbyte,disk + offset.val + i * sizeof(FileEntry),sizeof(fbyte) );
             printf("Fbyte: %u\n",fbyte);
 
@@ -414,7 +414,7 @@ Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, Fi
                 
                 if(empty_entries_found == count){
                     *last = FileHandle{ent,i};
-                    return {OK};
+                    return {(int)Fat12Status::OK};
                 }
             }else{
                 empty_entries_found = 0;
@@ -428,7 +428,7 @@ Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, Fi
     while(empty_entries_found<count){
         
         auto newcluster = GetNextFreeCluster();
-        if(!newcluster.Ok())return {ERROR};
+        if(!newcluster.Ok())return {(int)Fat12Status::ERROR};
         SetFAT12_entry(lastent,newcluster.val);
         SetFAT12_entry(newcluster.val,0xfff);
         for(uint16_t j=0; j < GetNumberOfFileEntriesPerCluster(newcluster.val); j++){
@@ -438,14 +438,14 @@ Result<none> FAT12::AllocateMultipleEntriesInDir(Directory dir, size_t count, Fi
             empty_entries_found += 1;
             if(empty_entries_found == count){
                 *last = FileHandle{newcluster.val,j};
-                return {OK};
+                return {(int)Fat12Status::OK};
             }
         }
         lastent = newcluster.val;
     }
 
     
-    return {OK};
+    return {(int)Fat12Status::OK};
 
 }
 
@@ -457,12 +457,12 @@ Result<FileHandle> FAT12::GetShortNameInDir(Directory dir, const char *shortname
         
         if(GetFileEntryFromHanlde(fh,&fe_buf).Ok()){
             if(memcmp(shortname,fe_buf.DIR_Name,MIN(shortname_len,sizeof(fe_buf.DIR_Name)))==0 && fe_buf.DIR_Attr != ATTR_LONG_NAME){
-                return {OK,fh};
+                return {(int)Fat12Status::OK,fh};
             };
             printf("1\n");
         }else{
 
-            return {ERROR};
+            return {(int)Fat12Status::ERROR};
         };
         auto res_fh = GetNextEntryInDir(fh);
         if(res_fh.Ok()){
@@ -472,7 +472,7 @@ Result<FileHandle> FAT12::GetShortNameInDir(Directory dir, const char *shortname
         }
         
     }
-    return {FILE_DOES_NOT_EXIST};
+    return {(int)Fat12Status::FILE_DOES_NOT_EXIST};
 }
 
 Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, size_t longname_len)
@@ -492,7 +492,7 @@ Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, 
 
             {
                 auto next_res = GetNextEntryInDir(csfh);
-                if(!next_res.Ok())return {ERROR};
+                if(!next_res.Ok())return {(int)Fat12Status::ERROR};
                 csfh = next_res.val;
             }
         }
@@ -553,7 +553,7 @@ Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, 
             && memcmp(n3,lne_buf.LDIR_Name3,sizeof(n3)) == 0){
         
                 auto next_res = GetNextEntryInDir(csfh);
-                if(!next_res.Ok())return {ERROR};
+                if(!next_res.Ok())return {(int)Fat12Status::ERROR};
                 csfh = next_res.val;
                 
                 GetFileEntryFromHanlde(csfh,(FileEntry*)&lne_buf);
@@ -562,18 +562,18 @@ Result<FileHandle> FAT12::GetLongNameInDir(Directory dir, const char *longname, 
             }
         }
         if(lne_count == 0){
-            return {OK,csfh};////return the found values here
+            return {(int)Fat12Status::OK,csfh};////return the found values here
         }else{
             for(size_t i = 0; i < lne_count+1; i++){
                 auto next_res = GetNextEntryInDir(csfh);
-                if(!next_res.Ok())return {ERROR};
+                if(!next_res.Ok())return {(int)Fat12Status::ERROR};
                 csfh = next_res.val;
             }
         }
 
 
     }
-    return {ERROR};
+    return {(int)Fat12Status::ERROR};
 
 }
 
@@ -581,7 +581,7 @@ Result<none> FAT12::CreateShortNameFromLongName(char *shortname_out, const char 
 {
     size_t shift = 0;
     size_t offset = 0;
-    if(longname_len == 0)return {ERROR};
+    if(longname_len == 0)return {(int)Fat12Status::ERROR};
     while(1){
         memset(shortname_out,0x20,SHORTNAME_LEN);
         size_t count = MIN(longname_len-shift,SHORTNAME_LEN);
@@ -600,7 +600,7 @@ Result<none> FAT12::CreateShortNameFromLongName(char *shortname_out, const char 
             offset +=1;
         }
     }
-    return {OK};
+    return {(int)Fat12Status::OK};
 
 }
 
@@ -651,7 +651,7 @@ Result<none> FAT12::AllocateNewEntryInDir(Directory dir, FileHandle *out_entry)
                 if(fbyte ==  0xE5 || fbyte == 0x00){
                     *out_entry = FileHandle{ent, i};
                     
-                    return {OK};
+                    return {(int)Fat12Status::OK};
                 }
             }
         
@@ -660,12 +660,12 @@ Result<none> FAT12::AllocateNewEntryInDir(Directory dir, FileHandle *out_entry)
     }
     auto newsector_res = GetNextFreeCluster();
 
-    if(!newsector_res.Ok())return {ERROR};
+    if(!newsector_res.Ok())return {(int)Fat12Status::ERROR};
 
     SetFAT12_entry(lastent,newsector_res.val);
     SetFAT12_entry(newsector_res.val,0xfff);
     *out_entry = FileHandle{newsector_res.val,0};
-    return {OK};
+    return {(int)Fat12Status::OK};
 
 }
 
@@ -733,7 +733,7 @@ Result<none> FAT12::Format(const char *volumename, BytesPerSector bytespersector
 
     InitFAT();
     InitRootDir();
-    return {OK};
+    return {(int)Fat12Status::OK};
 
 }
 Result<none> FAT12::CreateFile(const char name[8], const char extension[3], Directory parent,FileHandle* filehandle)
@@ -759,18 +759,18 @@ Result<none> FAT12::CreateFile(const char name[8], const char extension[3], Dire
     file.DIR_FileSize = 0;
     
     FileHandle newfilehandle;
-    if(!AllocateNewEntryInDir(parent,&newfilehandle).Ok())return {ERROR};
+    if(!AllocateNewEntryInDir(parent,&newfilehandle).Ok())return {(int)Fat12Status::ERROR};
 
     auto  firstcluster = GetNextFreeCluster();
 
-    if(!firstcluster.Ok())return {ERROR};
+    if(!firstcluster.Ok())return {(int)Fat12Status::ERROR};
 
     file.DIR_FstClusLO = firstcluster.val;
-    if(!SetFAT12_entry(firstcluster.val,END_OF_FILE).Ok())return {ERROR};
+    if(!SetFAT12_entry(firstcluster.val,END_OF_FILE).Ok())return {(int)Fat12Status::ERROR};
     
 
     auto offsettofilehandle_res = OffsetToFileHandle(newfilehandle);
-    if(!offsettofilehandle_res.Ok()) return {ERROR};
+    if(!offsettofilehandle_res.Ok()) return {(int)Fat12Status::ERROR};
 
     memcpy(disk +offsettofilehandle_res.val
         ,
@@ -778,7 +778,7 @@ Result<none> FAT12::CreateFile(const char name[8], const char extension[3], Dire
         sizeof(file)
     );
     *filehandle = newfilehandle;
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 Result<none> FAT12::DeleteFile(FileHandle filehandle)
 {
@@ -786,7 +786,7 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
     FileEntry fentry;
     bool haslongname = false;
 
-    if(!GetFileEntryFromHanlde(filehandle,&fentry).Ok())return {ERROR};
+    if(!GetFileEntryFromHanlde(filehandle,&fentry).Ok())return {(int)Fat12Status::ERROR};
 
     uint8_t lname_chk;
 
@@ -801,16 +801,16 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
         uint16_t entriestofileentry = (longname_entry.LDIR_Attr & (~0x40));
         for(size_t i = 0; i < entriestofileentry; i++){
             auto nextfh = GetNextEntryInDir(ffilehandle);
-            if(!nextfh.Ok())return{ERROR};
+            if(!nextfh.Ok())return{(int)Fat12Status::ERROR};
             ffilehandle = nextfh.val;
         }
         auto ffo = OffsetToFileHandle(ffilehandle);
         if(!ffo.Ok()){
-            return {ERROR};
+            return {(int)Fat12Status::ERROR};
         }
         memcpy(&fentry,disk +ffo.val,sizeof(fentry) );
         if(lname_chk == LongNameChecksum(fentry.DIR_Name)){
-            return {LONGFILEENTRY_IS_CORRUPTED};
+            return {(int)Fat12Status::LONGFILEENTRY_IS_CORRUPTED};
         };
         haslongname = true;
     }else{
@@ -838,13 +838,13 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
         {
             LongNameEntry entry_buffer;
             auto offset_to_eb = OffsetToFileHandle(lastfh);
-            if(!offset_to_eb.Ok()){return{ERROR};}
+            if(!offset_to_eb.Ok()){return{(int)Fat12Status::ERROR};}
             memcpy(&entry_buffer, disk +offset_to_eb.val,sizeof(entry_buffer));
             if(entry_buffer.LDIR_Attr == ATTR_LONG_NAME && (entry_buffer.LDIR_ord & 0x40)){
                 break;
             }
             auto new_lastfh = GetPreviousEntryInDir(lastfh);
-            if(!new_lastfh.Ok()){return{ERROR};}
+            if(!new_lastfh.Ok()){return{(int)Fat12Status::ERROR};}
             lastfh = new_lastfh.val;
         }
     }
@@ -852,7 +852,7 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
     {
         LongNameEntry first_lne_buf;
         auto offset_first_lne_buf = OffsetToFileHandle(filehandle);
-        if((!offset_first_lne_buf.Ok()) && haslongname)return {ERROR};
+        if((!offset_first_lne_buf.Ok()) && haslongname)return {(int)Fat12Status::ERROR};
 
         memcpy(&first_lne_buf,disk+offset_first_lne_buf.val,sizeof(first_lne_buf));
         if(first_lne_buf.LDIR_Attr == ATTR_LONG_NAME){
@@ -867,7 +867,7 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
     if(fentry.DIR_Attr & ATTR_DIRECTORY){
         auto empty = DirectoryEmpty({fentry.DIR_FstClusLO});
         if(!(empty.Ok() && empty.val)){
-            return {DIRECTORY_NOT_EMPTY};
+            return {(int)Fat12Status::DIRECTORY_NOT_EMPTY};
         }
     };
     bool finished = false;
@@ -875,10 +875,10 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
         finished = memcmp(&lastfh, &ffilehandle,sizeof(FileHandle)) == 0;
 
         auto offset = OffsetToFileHandle(lastfh);
-        if(!offset.Ok()){return {ERROR};}
+        if(!offset.Ok()){return {(int)Fat12Status::ERROR};}
         memset(disk + offset.val,0xE5,sizeof(FileEntry)); // this might need some change too!
         auto next = GetNextEntryInDir(lastfh);
-        if(!next.Ok()){return {ERROR};}
+        if(!next.Ok()){return {(int)Fat12Status::ERROR};}
         lastfh = next.val;
     }
 
@@ -893,34 +893,34 @@ Result<none> FAT12::DeleteFile(FileHandle filehandle)
         if(nextfat.Ok()){
             SetFAT12_entry(fat,0);
             auto offsettocluster = OffsetToCluster(fat);
-            if(!offsettocluster.Ok())return {ERROR};
+            if(!offsettocluster.Ok())return {(int)Fat12Status::ERROR};
 
             memset(disk + offsettocluster.val,0,bpb.BPB_BytsPerSec*bpb.BPB_SecPerClus);
             fat = nextfat.val;
         }
     }
    
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 
 Result<none> FAT12::ClearContentsOfFile(FileHandle filehandle)
 {
     FileEntry fe;
     if(!GetFileEntryFromHanlde(filehandle,&fe).Ok()){
-        return {ERROR};
+        return {(int)Fat12Status::ERROR};
     }
     fe.DIR_FileSize = 0;
     size_t fatent= fe.DIR_FstClusLO;
     size_t nextfatent = 0;
     while(nextfatent < 0xff8)
     {
-        HANDLE_ERROR(,nextfatent,GetFAT12_entry(fatent),return {ERROR};);
+        HANDLE_ERROR(,nextfatent,GetFAT12_entry(fatent),return {(int)Fat12Status::ERROR};);
         ClearCluster(fatent);
         SetFAT12_entry(fatent,0);
     }
     SetFAT12_entry(fe.DIR_FstClusLO,0xfff);
     memcpy(disk+OffsetToFileHandle(filehandle).val,&fe,sizeof(fe));
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 
 Result<FileIOHandle> FAT12::Open(FileHandle file, uint8_t mode)
@@ -930,7 +930,7 @@ Result<FileIOHandle> FAT12::Open(FileHandle file, uint8_t mode)
     fileio.handle = file;
     FileEntry entry;
     auto entry_res = GetFileEntryFromHanlde(fileio.handle,&entry);
-    if(!entry_res.Ok()){return {ERROR};};
+    if(!entry_res.Ok()){return {(int)Fat12Status::ERROR};};
     PRINT_X(mode);
     if(mode & FILE_MODE_WRITE){
         fileio.mode = FILE_IO_WRITE;
@@ -960,20 +960,20 @@ Result<FileIOHandle> FAT12::Open(FileHandle file, uint8_t mode)
         fileio.currentAU = entry.DIR_FstClusLO;
     }
 
-    return {OK,fileio};
+    return {(int)Fat12Status::OK,fileio};
 }
 
 Result<none> FAT12::Close(FileIOHandle *file)
 {
     memset(file,0,sizeof(FileIOHandle));
-    return {OK};
+    return {(int)Fat12Status::OK};
 }
 
 Result<size_t> FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersize)
 {
     size_t read = 0;
     FileEntry entry;
-    if(!GetFileEntryFromHanlde(file.handle,&entry).Ok()){return {ERROR};};
+    if(!GetFileEntryFromHanlde(file.handle,&entry).Ok()){return {(int)Fat12Status::ERROR};};
 
     //PRINT_i(file.currentAU);
     //PRINT_i(file.currentoffset);
@@ -989,7 +989,7 @@ Result<size_t> FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersiz
         size_t readsize = MIN(MIN(possible_read_buffer,possible_read_file),possible_read_sector);
         
         auto clusteroffset = OffsetToCluster(file.currentAU);
-        if(!clusteroffset.Ok()){return {ERROR};};
+        if(!clusteroffset.Ok()){return {(int)Fat12Status::ERROR};};
         //PRINT_i(clusteroffset.val);
         memcpy(buffer+read,disk+clusteroffset.val +offsetintosector, readsize);
         //PRINT_i(read);
@@ -1002,13 +1002,13 @@ Result<size_t> FAT12::Read(FileIOHandle &file, uint8_t *buffer, size_t buffersiz
             IterateFat(&file.currentAU);
         }
     }
-    return {OK,read};
+    return {(int)Fat12Status::OK,read};
 }
 
 Result<size_t> FAT12::Write(FileIOHandle &file,const uint8_t *buffer, size_t buffersize)
 {
     size_t offset_into_buffer = 0;
-    if(!(file.mode & FILE_IO_WRITE)){return {ERROR};};
+    if(!(file.mode & FILE_IO_WRITE)){return {(int)Fat12Status::ERROR};};
 
     while(offset_into_buffer < buffersize){
 
@@ -1019,7 +1019,7 @@ Result<size_t> FAT12::Write(FileIOHandle &file,const uint8_t *buffer, size_t buf
 
         auto offset_to_cluster = OffsetToCluster(file.currentAU);
         if(!offset_to_cluster.Ok()){
-            return {ERROR};
+            return {(int)Fat12Status::ERROR};
         }
 
         size_t maxwrite = MIN(GetAllocationUnitSize()-offset_in_sector,buffersize);
@@ -1031,12 +1031,12 @@ Result<size_t> FAT12::Write(FileIOHandle &file,const uint8_t *buffer, size_t buf
 
         if(offset_in_sector >= GetAllocationUnitSize()){
             auto next = GetFAT12_entry(file.currentAU);
-            if(!next.Ok())return{ERROR};
+            if(!next.Ok())return{(int)Fat12Status::ERROR};
             if(next.val == END_OF_FILE){
 
                 auto next_free_cluster = GetNextFreeCluster();
                 if(!next_free_cluster.Ok()){
-                    return {ERROR};
+                    return {(int)Fat12Status::ERROR};
                 }
                 SetFAT12_entry(file.currentAU,next_free_cluster.val);
                 SetFAT12_entry(next_free_cluster.val,END_OF_FILE);
@@ -1048,11 +1048,11 @@ Result<size_t> FAT12::Write(FileIOHandle &file,const uint8_t *buffer, size_t buf
     }
     FileEntry entry;
     auto offset_entry = OffsetToFileHandle(file.handle);
-    if(!offset_entry.Ok()){return {OK};};
+    if(!offset_entry.Ok()){return {(int)Fat12Status::OK};};
     memcpy(&entry,disk + offset_entry.val,sizeof(FileEntry));
     entry.DIR_FileSize = MAX(entry.DIR_FileSize, file.currentoffset);
     memcpy(disk + offset_entry.val,&entry,sizeof(FileEntry));
-    return {OK,buffersize};
+    return {(int)Fat12Status::OK,buffersize};
 
 }
 
@@ -1077,20 +1077,20 @@ Result<none> FAT12::CreateDir(const char name[8],const char extension[3], Direct
     if(!firstcluster.Ok())return {firstcluster.status};
 
     SetFAT12_entry(firstcluster.val,0xfff);
-    if(firstcluster.val == 0)return {ERROR};
+    if(firstcluster.val == 0)return {(int)Fat12Status::ERROR};
 
     dir.DIR_FstClusLO = firstcluster.val;
     dir.DIR_FileSize = 0;
 
     FileHandle newdirhandle;
-    if(!AllocateNewEntryInDir(parent,&newdirhandle).Ok())return {ERROR};
+    if(!AllocateNewEntryInDir(parent,&newdirhandle).Ok())return {(int)Fat12Status::ERROR};
 
     *filehandle = newdirhandle;
 
     
     auto offsettofilehandle_res = OffsetToFileHandle(newdirhandle);
 
-    if(!offsettofilehandle_res.Ok())return {ERROR};
+    if(!offsettofilehandle_res.Ok())return {(int)Fat12Status::ERROR};
     
     memcpy(disk +
         offsettofilehandle_res.val,
@@ -1107,7 +1107,7 @@ Result<none> FAT12::CreateDir(const char name[8],const char extension[3], Direct
     memcpy(dot.DIR_Name,".",1);
 
     auto offset_df = OffsetToFileHandle(df);
-    if(!offset_df.Ok())return {ERROR};
+    if(!offset_df.Ok())return {(int)Fat12Status::ERROR};
 
     memcpy(disk +
         offset_df.val,
@@ -1126,7 +1126,7 @@ Result<none> FAT12::CreateDir(const char name[8],const char extension[3], Direct
     OffsetToFileHandle(ddf);
 
     auto offset_ddf = OffsetToFileHandle(ddf);
-    if(!offset_ddf.Ok())return {ERROR};
+    if(!offset_ddf.Ok())return {(int)Fat12Status::ERROR};
 
     memcpy(disk +
         offset_ddf.val,
@@ -1136,7 +1136,7 @@ Result<none> FAT12::CreateDir(const char name[8],const char extension[3], Direct
 
 
 
-    return {OK};
+    return {(int)Fat12Status::OK};
 
 
 }
@@ -1155,18 +1155,18 @@ Result<bool> FAT12::DirectoryEmpty(Directory directory)
                 if(DirIsDotOrDotDot(&entry)){
                     continue;
                 }
-                return {OK,false};
+                return {(int)Fat12Status::OK,false};
             }else{
-                return {ERROR};
+                return {(int)Fat12Status::ERROR};
             }
         }
     }
-    return {OK,false};
+    return {(int)Fat12Status::OK,false};
 }
 
 int FAT12::SectorSerialDump(size_t index)
 {   
-    if(!(index < bpb.BPB_TotSec16))return ERROR;
+    if(!(index < bpb.BPB_TotSec16))return (int)Fat12Status::ERROR;
     uint8_t buf[bpb.BPB_BytsPerSec];
 
     memcpy(buf,disk+(index*bpb.BPB_BytsPerSec),bpb.BPB_BytsPerSec);
@@ -1179,7 +1179,7 @@ int FAT12::SectorSerialDump(size_t index)
         }
     }
     printf("\n");
-    return OK;
+    return (int)Fat12Status::OK;
 }
 
 Result<none> FAT12::Mount()
@@ -1187,8 +1187,8 @@ Result<none> FAT12::Mount()
     
     auto result = ReadFirst512bytes(&bpb);
     bool fat12 = IsFAT12(&bpb);
-    if(fat12 && (result.Ok()))return {OK};
-    return {ERROR};
+    if(fat12 && (result.Ok()))return {(int)Fat12Status::OK};
+    return {(int)Fat12Status::ERROR};
 }
 
 
