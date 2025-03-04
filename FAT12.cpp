@@ -1022,7 +1022,7 @@ Result<size_t> FAT12::Write(FileIOHandle &file,const uint8_t *buffer, size_t buf
             return {(int)Fat12Status::ERROR};
         }
 
-        size_t maxwrite = MIN(GetAllocationUnitSize()-offset_in_sector,buffersize);
+        size_t maxwrite = MIN(GetAllocationUnitSize()-offset_in_sector,buffersize-offset_into_buffer);
 
         memcpy(disk + offset_to_cluster.val+offset_in_sector,buffer+offset_into_buffer,maxwrite);
         offset_into_buffer += maxwrite;
